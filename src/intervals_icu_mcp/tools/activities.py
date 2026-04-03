@@ -30,6 +30,11 @@ async def get_recent_activities(
     assert ctx is not None
     config: ICUConfig = ctx.get_state("config")
 
+    if days_back < 1:
+        return ResponseBuilder.build_error_response(
+            "days_back must be at least 1", error_type="validation_error"
+        )
+
     try:
         # Calculate date range
         oldest_date = datetime.now() - timedelta(days=days_back)
@@ -458,19 +463,16 @@ async def download_activity_file(
 
             if output_path:
                 # Save to file
-                import os
+                from pathlib import Path
 
-                os.makedirs(
-                    os.path.dirname(output_path) if os.path.dirname(output_path) else ".",
-                    exist_ok=True,
-                )
-                with open(output_path, "wb") as f:
-                    f.write(file_content)
+                safe_path = Path(output_path).resolve()
+                safe_path.parent.mkdir(parents=True, exist_ok=True)
+                safe_path.write_bytes(file_content)
 
                 return ResponseBuilder.build_response(
                     data={
                         "activity_id": activity_id,
-                        "saved_to": output_path,
+                        "saved_to": str(safe_path),
                         "size_bytes": len(file_content),
                     },
                     query_type="download_activity_file",
@@ -526,20 +528,17 @@ async def download_fit_file(
 
             if output_path:
                 # Save to file
-                import os
+                from pathlib import Path
 
-                os.makedirs(
-                    os.path.dirname(output_path) if os.path.dirname(output_path) else ".",
-                    exist_ok=True,
-                )
-                with open(output_path, "wb") as f:
-                    f.write(file_content)
+                safe_path = Path(output_path).resolve()
+                safe_path.parent.mkdir(parents=True, exist_ok=True)
+                safe_path.write_bytes(file_content)
 
                 return ResponseBuilder.build_response(
                     data={
                         "activity_id": activity_id,
                         "format": "FIT",
-                        "saved_to": output_path,
+                        "saved_to": str(safe_path),
                         "size_bytes": len(file_content),
                     },
                     query_type="download_fit_file",
@@ -596,20 +595,17 @@ async def download_gpx_file(
 
             if output_path:
                 # Save to file
-                import os
+                from pathlib import Path
 
-                os.makedirs(
-                    os.path.dirname(output_path) if os.path.dirname(output_path) else ".",
-                    exist_ok=True,
-                )
-                with open(output_path, "wb") as f:
-                    f.write(file_content)
+                safe_path = Path(output_path).resolve()
+                safe_path.parent.mkdir(parents=True, exist_ok=True)
+                safe_path.write_bytes(file_content)
 
                 return ResponseBuilder.build_response(
                     data={
                         "activity_id": activity_id,
                         "format": "GPX",
-                        "saved_to": output_path,
+                        "saved_to": str(safe_path),
                         "size_bytes": len(file_content),
                     },
                     query_type="download_gpx_file",

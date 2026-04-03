@@ -1,6 +1,6 @@
 """Calendar and event tools for Intervals.icu MCP server."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated, Any
 
 from fastmcp import Context
@@ -67,7 +67,7 @@ async def get_calendar_events(
                     events_by_date[date] = []
 
                 # Determine relative timing
-                date_obj = datetime.strptime(date, "%Y-%m-%d").date()
+                date_obj = datetime.fromisoformat(date).date()
                 today = datetime.now().date()
 
                 if date_obj == today:
@@ -80,6 +80,7 @@ async def get_calendar_events(
                     relative_timing = f"in_{days_until}_days"
 
                 event_item: dict[str, Any] = {
+                    "id": event.id,
                     "date": date,
                     "relative_timing": relative_timing,
                     "name": event.name or event.category or "Event",
@@ -189,7 +190,7 @@ async def get_upcoming_workouts(
 
             workouts_data: list[dict[str, Any]] = []
             for workout in workouts:
-                date_obj = datetime.strptime(workout.start_date_local, "%Y-%m-%d").date()
+                date_obj = datetime.fromisoformat(workout.start_date_local).date()
                 today = datetime.now().date()
 
                 if date_obj == today:

@@ -142,19 +142,22 @@ async def get_activity_intervals(
                     "type": interval.type,
                 }
 
-                if interval.start is not None:
-                    interval_item["start_seconds"] = interval.start
-                if interval.end is not None:
-                    interval_item["end_seconds"] = interval.end
-                if interval.duration is not None:
-                    interval_item["duration_seconds"] = interval.duration
+                if interval.start_time is not None:
+                    interval_item["start_seconds"] = interval.start_time
+                if interval.end_time is not None:
+                    interval_item["end_seconds"] = interval.end_time
+                if interval.moving_time is not None:
+                    interval_item["duration_seconds"] = interval.moving_time
+
+                if interval.label:
+                    interval_item["label"] = interval.label
 
                 # Performance metrics
                 performance: dict[str, Any] = {}
                 if interval.average_watts:
                     performance["average_watts"] = interval.average_watts
-                if interval.normalized_power:
-                    performance["normalized_power"] = interval.normalized_power
+                if interval.weighted_average_watts:
+                    performance["normalized_power"] = interval.weighted_average_watts
                 if interval.average_heartrate:
                     performance["average_heartrate"] = interval.average_heartrate
                 if interval.max_heartrate:
@@ -165,24 +168,17 @@ async def get_activity_intervals(
                     performance["average_speed_meters_per_sec"] = interval.average_speed
                 if interval.distance:
                     performance["distance_meters"] = interval.distance
+                if interval.training_load:
+                    performance["training_load"] = interval.training_load
 
                 if performance:
                     interval_item["performance"] = performance
 
-                # Target data
-                if interval.target:
-                    interval_item["target_description"] = interval.target
-                if interval.target_min is not None or interval.target_max is not None:
-                    interval_item["target_range"] = {
-                        "min": interval.target_min,
-                        "max": interval.target_max,
-                    }
-
                 intervals_data.append(interval_item)
 
             # Calculate summary
-            work_intervals = [i for i in intervals if i.type and "WORK" in i.type.upper()]
-            rest_intervals = [i for i in intervals if i.type and "REST" in i.type.upper()]
+            work_intervals = [i for i in intervals if i.type == "WORK"]
+            rest_intervals = [i for i in intervals if i.type == "RECOVERY"]
 
             summary = {
                 "total_intervals": len(intervals),
@@ -192,7 +188,7 @@ async def get_activity_intervals(
 
             # Calculate total work time
             if work_intervals:
-                total_work_time = sum(i.duration for i in work_intervals if i.duration)
+                total_work_time = sum(i.moving_time for i in work_intervals if i.moving_time)
                 if total_work_time:
                     summary["total_work_time_seconds"] = total_work_time
 
@@ -217,16 +213,20 @@ async def get_activity_intervals(
 
 async def get_best_efforts(
     activity_id: Annotated[str, "Activity ID to analyze"],
+    stream: Annotated[
+        str,
+        "Stream to find best efforts for: 'watts' (power), 'heartrate', 'velocity_smooth' (speed). Default: 'watts'",
+    ] = "watts",
     ctx: Context | None = None,
 ) -> str:
     """Get best efforts/peak performances from an activity.
 
-    Analyzes the activity to find the best performances across various durations
-    (e.g., best 5-second power, best 1-minute power, best 20-minute power).
-    Similar to Strava segments but for all durations.
+    Finds the best average values for a specific metric (e.g., power, heart rate)
+    across various durations within the activity.
 
     Args:
         activity_id: The unique ID of the activity
+        stream: Which metric to analyze ('watts', 'heartrate', 'velocity_smooth')
 
     Returns:
         JSON string with best efforts data
@@ -236,43 +236,24 @@ async def get_best_efforts(
 
     try:
         async with ICUClient(config) as client:
-            best_efforts = await client.get_best_efforts(activity_id)
+            response = await client.get_best_efforts(activity_id, stream=stream)
 
-            if not best_efforts:
+            if not response.efforts:
                 return ResponseBuilder.build_response(
                     data={"best_efforts": [], "count": 0, "activity_id": activity_id},
                     metadata={"message": "No best efforts found for this activity"},
                 )
 
             efforts_data: list[dict[str, Any]] = []
-            for effort in best_efforts:
+            for effort in response.efforts:
                 effort_item: dict[str, Any] = {
-                    "name": effort.name,
-                    "elapsed_time_seconds": effort.elapsed_time,
+                    "duration_seconds": effort.duration,
+                    "average_value": effort.average,
+                    "stream": stream,
                 }
 
-                if effort.moving_time:
-                    effort_item["moving_time_seconds"] = effort.moving_time
                 if effort.distance:
                     effort_item["distance_meters"] = effort.distance
-
-                # Performance metrics
-                performance: dict[str, Any] = {}
-                if effort.average_watts:
-                    performance["average_watts"] = effort.average_watts
-                if effort.normalized_power:
-                    performance["normalized_power"] = effort.normalized_power
-                if effort.average_heartrate:
-                    performance["average_heartrate"] = effort.average_heartrate
-                if effort.average_cadence:
-                    performance["average_cadence"] = effort.average_cadence
-                if effort.average_speed:
-                    performance["average_speed_meters_per_sec"] = effort.average_speed
-
-                if performance:
-                    effort_item["performance"] = performance
-
-                # Location in activity
                 if effort.start_index is not None:
                     effort_item["start_index"] = effort.start_index
                 if effort.end_index is not None:
@@ -282,6 +263,7 @@ async def get_best_efforts(
 
             result_data = {
                 "activity_id": activity_id,
+                "stream": stream,
                 "best_efforts": efforts_data,
                 "count": len(efforts_data),
             }

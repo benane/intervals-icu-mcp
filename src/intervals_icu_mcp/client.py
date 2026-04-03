@@ -3,7 +3,7 @@
 from typing import Any
 
 import httpx
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from .auth import ICUConfig
 from .models import (
@@ -13,6 +13,8 @@ from .models import (
     ActivitySummary,
     Athlete,
     BestEffort,
+    BestEffortsResponse,
+    DataCurveSet,
     Event,
     Folder,
     Gear,
@@ -20,6 +22,7 @@ from .models import (
     Histogram,
     HRCurve,
     Interval,
+    IntervalsDTO,
     PaceCurve,
     PowerCurve,
     SportSettings,
@@ -78,6 +81,17 @@ class ICUClient:
         """Async context manager exit."""
         if self._client:
             await self._client.aclose()
+
+    def _parse(self, adapter: TypeAdapter[Any], data: Any) -> Any:
+        """Parse API response data with a Pydantic TypeAdapter.
+
+        Raises:
+            ICUAPIError: If the response data does not match the expected schema
+        """
+        try:
+            return adapter.validate_python(data)
+        except ValidationError as e:
+            raise ICUAPIError(f"Unexpected API response format: {e.error_count()} validation error(s)") from e
 
     async def _request(
         self,
@@ -170,7 +184,7 @@ class ICUClient:
 
         response = await self._request("GET", f"/athlete/{athlete_id}/activities", params=params)
         adapter = TypeAdapter(list[ActivitySummary])
-        activities = adapter.validate_python(response.json())
+        activities = self._parse(adapter, response.json())
 
         # Limit results
         return activities[:limit]
@@ -212,7 +226,7 @@ class ICUClient:
             "GET", f"/athlete/{athlete_id}/activities/search", params=params
         )
         adapter = TypeAdapter(list[ActivitySearchResult])
-        results = adapter.validate_python(response.json())
+        results = self._parse(adapter, response.json())
 
         return results[:limit]
 
@@ -239,7 +253,7 @@ class ICUClient:
             "GET", f"/athlete/{athlete_id}/activities/search-full", params=params
         )
         adapter = TypeAdapter(list[Activity])
-        results = adapter.validate_python(response.json())
+        results = self._parse(adapter, response.json())
 
         return results[:limit]
 
@@ -266,7 +280,7 @@ class ICUClient:
             "GET", f"/athlete/{athlete_id}/activities-around", params=params
         )
         adapter = TypeAdapter(list[Activity])
-        return adapter.validate_python(response.json())
+        return self._parse(adapter, response.json())
 
     async def update_activity(
         self,
@@ -433,7 +447,7 @@ class ICUClient:
 
         response = await self._request("GET", f"/athlete/{athlete_id}/wellness", params=params)
         adapter = TypeAdapter(list[Wellness])
-        return adapter.validate_python(response.json())
+        return self._parse(adapter, response.json())
 
     async def get_wellness_for_date(
         self,
@@ -512,7 +526,7 @@ class ICUClient:
             "PUT", f"/athlete/{athlete_id}/wellness-bulk", json=wellness_records
         )
         adapter = TypeAdapter(list[Wellness])
-        return adapter.validate_python(response.json())
+        return self._parse(adapter, response.json())
 
     # ==================== Event/Calendar Endpoints ====================
 
@@ -542,7 +556,7 @@ class ICUClient:
 
         response = await self._request("GET", f"/athlete/{athlete_id}/events", params=params)
         adapter = TypeAdapter(list[Event])
-        return adapter.validate_python(response.json())
+        return self._parse(adapter, response.json())
 
     async def get_event(
         self,
@@ -569,6 +583,7 @@ class ICUClient:
         athlete_id: str | None = None,
         oldest: str | None = None,
         newest: str | None = None,
+        activity_type: str = "Ride",
     ) -> PowerCurve:
         """Get power curve data (best efforts for various durations).
 
@@ -576,20 +591,25 @@ class ICUClient:
             athlete_id: Athlete ID (uses config default if not provided)
             oldest: Oldest date to include (ISO-8601 format)
             newest: Newest date to include (ISO-8601 format)
+            activity_type: Activity type (e.g. "Ride", "Run", "VirtualRide")
 
         Returns:
             PowerCurve with best efforts data
         """
         athlete_id = athlete_id or self.config.intervals_icu_athlete_id
-        params = {}
+        params: dict[str, Any] = {"type": activity_type}
 
         if oldest:
             params["oldest"] = oldest
         if newest:
             params["newest"] = newest
 
-        response = await self._request("GET", f"/athlete/{athlete_id}/power-curves", params=params)
-        return PowerCurve(**response.json())
+        response = await self._request(
+            "GET", f"/athlete/{athlete_id}/power-curves.json", params=params
+        )
+        adapter = TypeAdapter(DataCurveSet)
+        curve_set = self._parse(adapter, response.json())
+        return PowerCurve(data=curve_set.to_curve_pts("watts"))
 
     async def get_hr_curves(
         self,
@@ -615,8 +635,12 @@ class ICUClient:
         if newest:
             params["newest"] = newest
 
-        response = await self._request("GET", f"/athlete/{athlete_id}/hr-curves", params=params)
-        return HRCurve(**response.json())
+        response = await self._request(
+            "GET", f"/athlete/{athlete_id}/hr-curves.json", params=params
+        )
+        adapter = TypeAdapter(DataCurveSet)
+        curve_set = self._parse(adapter, response.json())
+        return HRCurve(data=curve_set.to_curve_pts("bpm"))
 
     async def get_pace_curves(
         self,
@@ -646,8 +670,12 @@ class ICUClient:
         if use_gap:
             params["gap"] = "true"
 
-        response = await self._request("GET", f"/athlete/{athlete_id}/pace-curves", params=params)
-        return PaceCurve(**response.json())
+        response = await self._request(
+            "GET", f"/athlete/{athlete_id}/pace-curves.json", params=params
+        )
+        adapter = TypeAdapter(DataCurveSet)
+        curve_set = self._parse(adapter, response.json())
+        return PaceCurve(data=curve_set.to_curve_pts("pace"))
 
     # ==================== Workout Library Endpoints ====================
 
@@ -666,7 +694,7 @@ class ICUClient:
         athlete_id = athlete_id or self.config.intervals_icu_athlete_id
         response = await self._request("GET", f"/athlete/{athlete_id}/folders")
         adapter = TypeAdapter(list[Folder])
-        return adapter.validate_python(response.json())
+        return self._parse(adapter, response.json())
 
     # ==================== Activity Analysis Endpoints ====================
 
@@ -683,8 +711,9 @@ class ICUClient:
             List of Interval objects
         """
         response = await self._request("GET", f"/activity/{activity_id}/intervals")
-        adapter = TypeAdapter(list[Interval])
-        return adapter.validate_python(response.json())
+        adapter = TypeAdapter(IntervalsDTO)
+        dto = self._parse(adapter, response.json())
+        return dto.icu_intervals
 
     async def get_activity_streams(
         self,
@@ -705,24 +734,47 @@ class ICUClient:
         if streams:
             params["types"] = ",".join(streams)
 
-        response = await self._request("GET", f"/activity/{activity_id}/streams", params=params)
-        return ActivityStreams(**response.json())
+        response = await self._request("GET", f"/activity/{activity_id}/streams.json", params=params)
+        data = response.json()
+        # API returns list[{type, name, data}], remap to ActivityStreams fields
+        if isinstance(data, list):
+            streams_dict = {s["type"]: s.get("data") for s in data if s.get("type")}
+            return ActivityStreams(**streams_dict)
+        return ActivityStreams(**data)
 
     async def get_best_efforts(
         self,
         activity_id: str,
-    ) -> list[BestEffort]:
-        """Get best efforts for an activity.
+        stream: str = "watts",
+        durations: list[int] | None = None,
+    ) -> BestEffortsResponse:
+        """Get best efforts for an activity across standard durations.
+
+        The API requires a specific duration per call, so this method loops over
+        the requested durations and aggregates the results.
 
         Args:
             activity_id: Activity ID
+            stream: Stream type (e.g. "watts", "heartrate", "velocity_smooth")
+            durations: List of durations in seconds. Defaults to standard key durations.
 
         Returns:
-            List of BestEffort objects
+            BestEffortsResponse with one Effort per duration
         """
-        response = await self._request("GET", f"/activity/{activity_id}/best-efforts")
-        adapter = TypeAdapter(list[BestEffort])
-        return adapter.validate_python(response.json())
+        if durations is None:
+            durations = [5, 10, 15, 30, 60, 120, 300, 600, 1200, 3600]
+
+        adapter = TypeAdapter(BestEffortsResponse)
+        efforts: list[BestEffort] = []
+        for duration in durations:
+            params = {"stream": stream, "duration": duration, "count": 1}
+            response = await self._request(
+                "GET", f"/activity/{activity_id}/best-efforts", params=params
+            )
+            result = self._parse(adapter, response.json())
+            efforts.extend(result.efforts)
+
+        return BestEffortsResponse(efforts=efforts)
 
     async def search_intervals(
         self,
@@ -779,7 +831,7 @@ class ICUClient:
         athlete_id = athlete_id or self.config.intervals_icu_athlete_id
         response = await self._request("GET", f"/athlete/{athlete_id}/folders/{folder_id}/workouts")
         adapter = TypeAdapter(list[Workout])
-        return adapter.validate_python(response.json())
+        return self._parse(adapter, response.json())
 
     # ==================== Event Write Operations ====================
 
@@ -858,7 +910,7 @@ class ICUClient:
         athlete_id = athlete_id or self.config.intervals_icu_athlete_id
         response = await self._request("GET", f"/athlete/{athlete_id}/gear")
         adapter = TypeAdapter(list[Gear])
-        return adapter.validate_python(response.json())
+        return self._parse(adapter, response.json())
 
     async def create_gear(
         self,
@@ -983,7 +1035,7 @@ class ICUClient:
         athlete_id = athlete_id or self.config.intervals_icu_athlete_id
         response = await self._request("GET", f"/athlete/{athlete_id}/sport-settings")
         adapter = TypeAdapter(list[SportSettings])
-        return adapter.validate_python(response.json())
+        return self._parse(adapter, response.json())
 
     async def update_sport_settings(
         self,
@@ -1092,7 +1144,7 @@ class ICUClient:
             "POST", f"/athlete/{athlete_id}/events/bulk", json=events_data
         )
         adapter = TypeAdapter(list[Event])
-        return adapter.validate_python(response.json())
+        return self._parse(adapter, response.json())
 
     async def bulk_delete_events(
         self,
@@ -1110,7 +1162,7 @@ class ICUClient:
         """
         athlete_id = athlete_id or self.config.intervals_icu_athlete_id
         response = await self._request(
-            "DELETE", f"/athlete/{athlete_id}/events/bulk", json={"ids": event_ids}
+            "PUT", f"/athlete/{athlete_id}/events/bulk-delete", json=[{"id": i} for i in event_ids]
         )
         return response.json()
 

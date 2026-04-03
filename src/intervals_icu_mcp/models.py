@@ -236,41 +236,67 @@ class Folder(BaseModel):
 
 
 class DataCurvePt(BaseModel):
-    """Single point on a power/HR/pace curve."""
+    """Single point on a power/HR/pace curve (normalized from API parallel arrays)."""
 
     secs: int  # Duration in seconds
     watts: int | None = None  # For power curves
     bpm: int | None = None  # For HR curves
     pace: float | None = None  # For pace curves (min/km)
     src_activity_id: str | None = None  # Activity where this effort occurred
-    date: str | None = None  # Date of the effort
+    date: str | None = None  # Not provided per-point by API, always None
+
+
+class DataCurve(BaseModel):
+    """A single curve from the API with parallel secs/values arrays."""
+
+    id: str | None = None
+    label: str | None = None
+    secs: list[int] = Field(default_factory=list)
+    values: list[int] = Field(default_factory=list)
+    activity_id: list[str] = Field(default_factory=list)
+    start_date_local: str | None = None
+    end_date_local: str | None = None
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class DataCurveSet(BaseModel):
+    """Response wrapper for power/hr/pace curve endpoints."""
+
+    curves: list[DataCurve] = Field(default_factory=list, alias="list")
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    def to_curve_pts(self, value_field: str = "watts") -> list[DataCurvePt]:
+        """Convert the first curve's parallel arrays to DataCurvePt list."""
+        if not self.curves:
+            return []
+        curve = self.curves[0]
+        pts = []
+        for i, (sec, val) in enumerate(zip(curve.secs, curve.values)):
+            activity_id = curve.activity_id[i] if i < len(curve.activity_id) else None
+            kwargs: dict[str, Any] = {"secs": sec, "src_activity_id": activity_id}
+            kwargs[value_field] = val
+            pts.append(DataCurvePt(**kwargs))
+        return pts
 
 
 class PowerCurve(BaseModel):
-    """Power curve data for an athlete."""
+    """Power curve data, normalized to list of DataCurvePt."""
 
-    name: str | None = None
-    type: str | None = None
-    athlete_id: str | None = None
-    data: list[DataCurvePt] = Field(default_factory=list[DataCurvePt])
+    data: list[DataCurvePt] = Field(default_factory=list)
 
 
 class HRCurve(BaseModel):
-    """Heart rate curve data for an athlete."""
+    """Heart rate curve data, normalized to list of DataCurvePt."""
 
-    name: str | None = None
-    type: str | None = None
-    athlete_id: str | None = None
-    data: list[DataCurvePt] = Field(default_factory=list[DataCurvePt])
+    data: list[DataCurvePt] = Field(default_factory=list)
 
 
 class PaceCurve(BaseModel):
-    """Pace curve data for an athlete."""
+    """Pace curve data, normalized to list of DataCurvePt."""
 
-    name: str | None = None
-    type: str | None = None
-    athlete_id: str | None = None
-    data: list[DataCurvePt] = Field(default_factory=list[DataCurvePt])
+    data: list[DataCurvePt] = Field(default_factory=list)
 
 
 # ==================== Training Plan Models ====================
@@ -320,20 +346,38 @@ class Interval(BaseModel):
     """Activity interval data."""
 
     id: int | None = None
-    type: str | None = None  # e.g., "WORK", "REST", "WARM_UP", "COOL_DOWN"
-    start: int | None = None  # Start time in seconds
-    end: int | None = None  # End time in seconds
-    duration: int | None = None  # Duration in seconds
+    type: str | None = None  # "WORK" or "RECOVERY"
+    label: str | None = None
+    start_index: int | None = None
+    end_index: int | None = None
+    start_time: int | None = None  # Start time in seconds from activity start
+    end_time: int | None = None  # End time in seconds from activity start
+    moving_time: int | None = None  # Duration excluding pauses
+    elapsed_time: int | None = None  # Total duration including pauses
     distance: float | None = None
     average_watts: int | None = None
-    normalized_power: int | None = None
+    weighted_average_watts: int | None = None  # Normalized power equivalent
+    max_watts: int | None = None
     average_heartrate: int | None = None
     max_heartrate: int | None = None
     average_cadence: float | None = None
     average_speed: float | None = None
-    target: str | None = None  # Target description
-    target_min: float | None = None
-    target_max: float | None = None
+    total_elevation_gain: float | None = None
+    training_load: float | None = None
+    group_id: str | None = None
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+
+class IntervalsDTO(BaseModel):
+    """Response wrapper for activity intervals endpoint."""
+
+    id: str | None = None
+    analyzed: str | None = None
+    icu_intervals: list["Interval"] = Field(default_factory=list)
+    icu_groups: list[dict[str, Any]] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
 
 # ==================== Activity Streams Models ====================
@@ -359,19 +403,23 @@ class ActivityStreams(BaseModel):
 
 
 class BestEffort(BaseModel):
-    """Best effort for a specific duration."""
+    """Best effort for a specific duration (matches Effort schema from API)."""
 
-    name: str | None = None
-    elapsed_time: int | None = None  # Duration in seconds
-    moving_time: int | None = None
     start_index: int | None = None
     end_index: int | None = None
+    average: float | None = None  # Average value for the requested stream
+    duration: int | None = None  # Duration in seconds
     distance: float | None = None
-    average_watts: int | None = None
-    normalized_power: int | None = None
-    average_heartrate: int | None = None
-    average_cadence: float | None = None
-    average_speed: float | None = None
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class BestEffortsResponse(BaseModel):
+    """Response wrapper for best-efforts endpoint."""
+
+    efforts: list["BestEffort"] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="ignore")
 
 
 # ==================== Gear Models ====================

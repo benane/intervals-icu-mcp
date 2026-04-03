@@ -13,7 +13,7 @@ from ..response_builder import ResponseBuilder
 async def create_event(
     start_date: Annotated[str, "Start date in YYYY-MM-DD format"],
     name: Annotated[str, "Event name"],
-    category: Annotated[str, "Event category: WORKOUT, NOTE, RACE, or GOAL"],
+    category: Annotated[str, "Event category: WORKOUT, NOTE, RACE, RACE_A, RACE_B, RACE_C, or GOAL"],
     description: Annotated[str | None, "Event description (optional)"] = None,
     event_type: Annotated[str | None, "Activity type (e.g., Ride, Run, Swim)"] = None,
     duration_seconds: Annotated[int | None, "Planned duration in seconds"] = None,
@@ -43,7 +43,7 @@ async def create_event(
     config: ICUConfig = ctx.get_state("config")
 
     # Validate category
-    valid_categories = ["WORKOUT", "NOTE", "RACE", "GOAL"]
+    valid_categories = ["WORKOUT", "NOTE", "RACE", "RACE_A", "RACE_B", "RACE_C", "GOAL"]
     if category.upper() not in valid_categories:
         return ResponseBuilder.build_error_response(
             f"Invalid category. Must be one of: {', '.join(valid_categories)}",
@@ -52,17 +52,27 @@ async def create_event(
 
     # Validate date format
     try:
-        datetime.strptime(start_date, "%Y-%m-%d")
+        datetime.fromisoformat(start_date)
     except ValueError:
         return ResponseBuilder.build_error_response(
             "Invalid date format. Please use YYYY-MM-DD format.",
             error_type="validation_error",
         )
 
+    if duration_seconds is not None and duration_seconds <= 0:
+        return ResponseBuilder.build_error_response(
+            "duration_seconds must be a positive value", error_type="validation_error"
+        )
+
+    if distance_meters is not None and distance_meters <= 0:
+        return ResponseBuilder.build_error_response(
+            "distance_meters must be a positive value", error_type="validation_error"
+        )
+
     try:
         # Build event data
         event_data: dict[str, Any] = {
-            "start_date_local": start_date,
+            "start_date_local": start_date + "T00:00:00" if "T" not in start_date else start_date,
             "name": name,
             "category": category.upper(),
         }
@@ -148,7 +158,7 @@ async def update_event(
     # Validate date format if provided
     if start_date:
         try:
-            datetime.strptime(start_date, "%Y-%m-%d")
+            datetime.fromisoformat(start_date)
         except ValueError:
             return ResponseBuilder.build_error_response(
                 "Invalid date format. Please use YYYY-MM-DD format.",
@@ -297,7 +307,7 @@ async def bulk_create_events(
         events_data: list[dict[str, Any]] = parsed_data  # type: ignore[assignment]
 
         # Validate each event
-        valid_categories = ["WORKOUT", "NOTE", "RACE", "GOAL"]
+        valid_categories = ["WORKOUT", "NOTE", "RACE", "RACE_A", "RACE_B", "RACE_C", "GOAL"]
         for i, event_data in enumerate(events_data):
             if "start_date_local" not in event_data:
                 return ResponseBuilder.build_error_response(
@@ -324,12 +334,14 @@ async def bulk_create_events(
 
             # Validate date format
             try:
-                datetime.strptime(event_data["start_date_local"], "%Y-%m-%d")
+                datetime.fromisoformat(event_data["start_date_local"])
             except ValueError:
                 return ResponseBuilder.build_error_response(
                     f"Event {i}: Invalid date format. Please use YYYY-MM-DD format.",
                     error_type="validation_error",
                 )
+            if "T" not in event_data["start_date_local"]:
+                event_data["start_date_local"] = event_data["start_date_local"] + "T00:00:00"
 
         async with ICUClient(config) as client:
             created_events = await client.bulk_create_events(events_data)
@@ -454,7 +466,7 @@ async def duplicate_event(
 
     # Validate date format
     try:
-        datetime.strptime(new_date, "%Y-%m-%d")
+        datetime.fromisoformat(new_date)
     except ValueError:
         return ResponseBuilder.build_error_response(
             "Invalid date format. Please use YYYY-MM-DD format.",
