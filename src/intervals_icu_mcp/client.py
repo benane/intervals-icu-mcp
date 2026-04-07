@@ -711,9 +711,12 @@ class ICUClient:
             List of Interval objects
         """
         response = await self._request("GET", f"/activity/{activity_id}/intervals")
+        data = response.json()
+        if not data:
+            return []
         adapter = TypeAdapter(IntervalsDTO)
-        dto = self._parse(adapter, response.json())
-        return dto.icu_intervals
+        dto = self._parse(adapter, data)
+        return dto.icu_intervals or []
 
     async def get_activity_streams(
         self,

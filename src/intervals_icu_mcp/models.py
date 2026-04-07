@@ -374,8 +374,8 @@ class IntervalsDTO(BaseModel):
 
     id: str | None = None
     analyzed: str | None = None
-    icu_intervals: list["Interval"] = Field(default_factory=list)
-    icu_groups: list[dict[str, Any]] = Field(default_factory=list)
+    icu_intervals: list["Interval"] | None = Field(default=None)
+    icu_groups: list[dict[str, Any]] | None = Field(default=None)
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
