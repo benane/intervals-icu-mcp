@@ -36,9 +36,10 @@ def mock_athlete_data():
         "sport_settings": [
             {
                 "id": 1,
-                "type": "Ride",
+                "types": ["Ride", "VirtualRide"],
                 "ftp": 250,
-                "fthr": 165,
+                "lthr": 165,
+                "max_hr": 190,
             }
         ],
     }

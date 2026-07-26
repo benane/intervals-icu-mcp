@@ -1,4 +1,4 @@
-"""Sport-specific settings tools for FTP, FTHR, pace thresholds, and zones."""
+"""Sport-specific settings tools for FTP, threshold HR, and threshold pace."""
 
 from typing import Annotated, Any
 
@@ -6,16 +6,161 @@ from fastmcp import Context
 
 from ..auth import ICUConfig
 from ..client import ICUAPIError, ICUClient
+from ..models import SportSettings
 from ..response_builder import ResponseBuilder
+
+# intervals.icu stores threshold_pace in meters per second no matter what
+# pace_units says. pace_units only controls the distance the pace is shown over.
+PACE_UNIT_METERS: dict[str, float] = {
+    "MINS_KM": 1000.0,
+    "MINS_MILE": 1609.344,
+    "SECS_100M": 100.0,
+    "SECS_100Y": 91.44,
+    "SECS_500M": 500.0,
+}
+
+PACE_UNIT_LABELS: dict[str, str] = {
+    "MINS_KM": "/km",
+    "MINS_MILE": "/mi",
+    "SECS_100M": "/100m",
+    "SECS_100Y": "/100y",
+    "SECS_500M": "/500m",
+}
+
+DEFAULT_PACE_UNITS = "MINS_KM"
+
+
+class SportSettingsInputError(ValueError):
+    """Raised when a tool argument cannot be interpreted."""
+
+
+def _as_int(value: int | str | None, field: str) -> int | None:
+    """Coerce a tool argument to int, tolerating clients that send numbers as strings."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise SportSettingsInputError(f"{field} must be a number, got a boolean")
+    if isinstance(value, int):
+        return value
+    try:
+        return int(float(value.strip()))
+    except (ValueError, AttributeError):
+        raise SportSettingsInputError(f"{field} must be a number, got {value!r}") from None
+
+
+def _pace_to_mps(value: float | str, units: str, field: str) -> float:
+    """Convert a threshold pace into meters per second.
+
+    Accepts "M:SS" (minutes and seconds over the unit distance) or a plain
+    number of seconds over the unit distance.
+    """
+    meters = PACE_UNIT_METERS.get(units, PACE_UNIT_METERS[DEFAULT_PACE_UNITS])
+
+    if isinstance(value, str) and ":" in value:
+        minutes_part, _, seconds_part = value.strip().partition(":")
+        try:
+            seconds = int(minutes_part) * 60 + float(seconds_part)
+        except ValueError:
+            raise SportSettingsInputError(
+                f"{field} must look like '4:30' or be a number of seconds, got {value!r}"
+            ) from None
+    else:
+        try:
+            seconds = float(value)
+        except (TypeError, ValueError):
+            raise SportSettingsInputError(
+                f"{field} must look like '4:30' or be a number of seconds, got {value!r}"
+            ) from None
+
+    if seconds <= 0:
+        raise SportSettingsInputError(f"{field} must be greater than zero, got {value!r}")
+
+    return meters / seconds
+
+
+def format_pace(mps: float, units: str | None) -> str:
+    """Render a meters-per-second pace as 'M:SS' over the configured unit distance."""
+    units = units or DEFAULT_PACE_UNITS
+    meters = PACE_UNIT_METERS.get(units, PACE_UNIT_METERS[DEFAULT_PACE_UNITS])
+    total_seconds = round(meters / mps)
+    label = PACE_UNIT_LABELS.get(units, PACE_UNIT_LABELS[DEFAULT_PACE_UNITS])
+    return f"{total_seconds // 60}:{total_seconds % 60:02d} {label}"
+
+
+def _summarize(settings: SportSettings) -> dict[str, Any]:
+    """Build the response payload for a single sport settings entry."""
+    info: dict[str, Any] = {
+        "id": settings.id,
+        "types": settings.types,
+    }
+
+    if settings.ftp is not None:
+        info["ftp_watts"] = settings.ftp
+    if settings.indoor_ftp is not None:
+        info["indoor_ftp_watts"] = settings.indoor_ftp
+    if settings.lthr is not None:
+        info["threshold_hr_bpm"] = settings.lthr
+    if settings.max_hr is not None:
+        info["max_hr_bpm"] = settings.max_hr
+    if settings.threshold_pace:
+        info["threshold_pace"] = format_pace(settings.threshold_pace, settings.pace_units)
+        info["threshold_pace_mps"] = round(settings.threshold_pace, 4)
+    if settings.pace_units is not None:
+        info["pace_units"] = settings.pace_units
+
+    return info
+
+
+def _build_update_payload(
+    ftp: int | str | None,
+    indoor_ftp: int | str | None,
+    threshold_hr: int | str | None,
+    max_hr: int | str | None,
+    threshold_pace: float | str | None,
+    pace_units: str | None,
+    current_pace_units: str | None,
+) -> dict[str, Any]:
+    """Translate tool arguments into an intervals.icu request body."""
+    payload: dict[str, Any] = {}
+
+    for field, value in (
+        ("ftp", _as_int(ftp, "ftp")),
+        ("indoor_ftp", _as_int(indoor_ftp, "indoor_ftp")),
+        ("lthr", _as_int(threshold_hr, "threshold_hr")),
+        ("max_hr", _as_int(max_hr, "max_hr")),
+    ):
+        if value is not None:
+            payload[field] = value
+
+    if pace_units is not None:
+        if pace_units not in PACE_UNIT_METERS:
+            raise SportSettingsInputError(
+                f"pace_units must be one of {', '.join(PACE_UNIT_METERS)}, got {pace_units!r}"
+            )
+        payload["pace_units"] = pace_units
+
+    if threshold_pace is not None:
+        units = pace_units or current_pace_units or DEFAULT_PACE_UNITS
+        payload["threshold_pace"] = _pace_to_mps(threshold_pace, units, "threshold_pace")
+
+    return payload
+
+
+async def _find_settings(client: ICUClient, sport_id: int) -> SportSettings | None:
+    """Look up one sport settings entry; the API has no single-entry GET we use."""
+    for settings in await client.get_sport_settings():
+        if settings.id == sport_id:
+            return settings
+    return None
 
 
 async def get_sport_settings(
     ctx: Context | None = None,
 ) -> str:
-    """Get all sport-specific settings (FTP, FTHR, pace thresholds, zones).
+    """Get all sport-specific settings (FTP, threshold HR, threshold pace, zones).
 
     Returns:
-        Formatted list of sport settings with thresholds and zones
+        Formatted list of sport settings with thresholds
     """
     assert ctx is not None
     config: ICUConfig = ctx.get_state("config")
@@ -29,41 +174,8 @@ async def get_sport_settings(
                     {"message": "No sport settings found"}, metadata={"count": 0}
                 )
 
-            settings_data: list[dict[str, Any]] = []
-
-            for settings in settings_list:
-                sport_info: dict[str, Any] = {
-                    "id": settings.id,
-                    "type": settings.type,
-                }
-
-                # Power settings (cycling)
-                if settings.ftp is not None:
-                    sport_info["ftp_watts"] = settings.ftp
-
-                # Heart rate settings
-                if settings.fthr is not None:
-                    sport_info["fthr_bpm"] = settings.fthr
-
-                # Pace settings (running/swimming)
-                if settings.pace_threshold is not None:
-                    # Convert to min:sec per km
-                    pace_secs = settings.pace_threshold * 60
-                    minutes = int(pace_secs // 60)
-                    seconds = int(pace_secs % 60)
-                    sport_info["pace_threshold"] = f"{minutes}:{seconds:02d} /km"
-
-                if settings.swim_threshold is not None:
-                    # Convert to min:sec per 100m
-                    swim_secs = settings.swim_threshold * 60
-                    minutes = int(swim_secs // 60)
-                    seconds = int(swim_secs % 60)
-                    sport_info["swim_threshold"] = f"{minutes}:{seconds:02d} /100m"
-
-                settings_data.append(sport_info)
-
             return ResponseBuilder.build_response(
-                {"sport_settings": settings_data},
+                {"sport_settings": [_summarize(s) for s in settings_list]},
                 metadata={"count": len(settings_list), "type": "sport_settings_list"},
             )
 
@@ -74,25 +186,33 @@ async def get_sport_settings(
 
 
 async def update_sport_settings(
-    sport_id: Annotated[int, "ID of the sport settings to update"],
-    ftp: Annotated[int | None, "Functional Threshold Power in watts (for cycling)"] = None,
-    fthr: Annotated[int | None, "Functional Threshold Heart Rate in bpm"] = None,
-    pace_threshold: Annotated[
-        float | None, "Threshold pace in min/km (e.g., 4.5 for 4:30/km)"
+    sport_id: Annotated[int | str, "ID of the sport settings to update"],
+    ftp: Annotated[int | str | None, "Functional Threshold Power in watts (cycling)"] = None,
+    indoor_ftp: Annotated[int | str | None, "Indoor Functional Threshold Power in watts"] = None,
+    threshold_hr: Annotated[int | str | None, "Threshold heart rate in bpm (LTHR/FTHR)"] = None,
+    max_hr: Annotated[int | str | None, "Maximum heart rate in bpm"] = None,
+    threshold_pace: Annotated[
+        float | str | None,
+        "Threshold pace as 'M:SS' over the sport's pace unit "
+        "(e.g. '4:30' for 4:30/km running, '1:45' for 1:45/100m swimming), "
+        "or a number of seconds",
     ] = None,
-    swim_threshold: Annotated[
-        float | None, "Swim threshold in min/100m (e.g., 1.5 for 1:30/100m)"
+    pace_units: Annotated[
+        str | None,
+        "Pace unit: MINS_KM, MINS_MILE, SECS_100M, SECS_100Y or SECS_500M",
     ] = None,
     ctx: Context | None = None,
 ) -> str:
-    """Update sport-specific settings (FTP, FTHR, pace thresholds).
+    """Update sport-specific settings (FTP, threshold HR, threshold pace).
 
     Args:
-        sport_id: ID of the sport settings to update
+        sport_id: ID of the sport settings to update (see get_sport_settings)
         ftp: Functional Threshold Power in watts (optional)
-        fthr: Functional Threshold Heart Rate in bpm (optional)
-        pace_threshold: Threshold pace in min/km (optional)
-        swim_threshold: Swim threshold in min/100m (optional)
+        indoor_ftp: Indoor Functional Threshold Power in watts (optional)
+        threshold_hr: Threshold heart rate in bpm (optional)
+        max_hr: Maximum heart rate in bpm (optional)
+        threshold_pace: Threshold pace as 'M:SS' or seconds (optional)
+        pace_units: Unit the pace is measured over (optional)
 
     Returns:
         Updated sport settings
@@ -101,53 +221,45 @@ async def update_sport_settings(
     config: ICUConfig = ctx.get_state("config")
 
     try:
+        sport_id_value = _as_int(sport_id, "sport_id")
+        assert sport_id_value is not None
+
         async with ICUClient(config) as client:
-            settings_data: dict[str, Any] = {}
+            current = await _find_settings(client, sport_id_value)
+            if current is None:
+                return ResponseBuilder.build_error_response(
+                    f"No sport settings found with id {sport_id_value}",
+                    error_type="not_found",
+                )
 
-            if ftp is not None:
-                settings_data["ftp"] = ftp
-            if fthr is not None:
-                settings_data["fthr"] = fthr
-            if pace_threshold is not None:
-                settings_data["pace_threshold"] = pace_threshold
-            if swim_threshold is not None:
-                settings_data["swim_threshold"] = swim_threshold
+            payload = _build_update_payload(
+                ftp,
+                indoor_ftp,
+                threshold_hr,
+                max_hr,
+                threshold_pace,
+                pace_units,
+                current.pace_units,
+            )
 
-            if not settings_data:
+            if not payload:
                 return ResponseBuilder.build_error_response(
                     "No fields provided to update", error_type="validation_error"
                 )
 
-            settings = await client.update_sport_settings(sport_id, settings_data)
-
-            result: dict[str, Any] = {
-                "id": settings.id,
-                "type": settings.type,
-            }
-
-            if settings.ftp is not None:
-                result["ftp_watts"] = settings.ftp
-            if settings.fthr is not None:
-                result["fthr_bpm"] = settings.fthr
-            if settings.pace_threshold is not None:
-                pace_secs = settings.pace_threshold * 60
-                minutes = int(pace_secs // 60)
-                seconds = int(pace_secs % 60)
-                result["pace_threshold"] = f"{minutes}:{seconds:02d} /km"
-            if settings.swim_threshold is not None:
-                swim_secs = settings.swim_threshold * 60
-                minutes = int(swim_secs // 60)
-                seconds = int(swim_secs % 60)
-                result["swim_threshold"] = f"{minutes}:{seconds:02d} /100m"
+            settings = await client.update_sport_settings(sport_id_value, payload)
 
             return ResponseBuilder.build_response(
-                result,
+                _summarize(settings),
                 metadata={
                     "type": "sport_settings_updated",
+                    "updated_fields": sorted(payload),
                     "message": "Sport settings updated successfully",
                 },
             )
 
+    except SportSettingsInputError as e:
+        return ResponseBuilder.build_error_response(str(e), error_type="validation_error")
     except ICUAPIError as e:
         return ResponseBuilder.build_error_response(e.message, error_type="api_error")
     except Exception as e:
@@ -155,20 +267,17 @@ async def update_sport_settings(
 
 
 async def apply_sport_settings(
-    sport_id: Annotated[int, "ID of the sport settings to apply"],
-    oldest_date: Annotated[
-        str | None, "Oldest date to apply settings to (YYYY-MM-DD format)"
-    ] = None,
+    sport_id: Annotated[int | str, "ID of the sport settings to apply"],
     ctx: Context | None = None,
 ) -> str:
-    """Apply sport settings (zones, thresholds) to historical activities.
+    """Apply sport settings (zones, thresholds) to matching activities.
 
-    This recalculates training load, zones, and other derived metrics for activities
-    based on the current sport settings.
+    This recalculates training load, zones, and other derived metrics for the
+    activities covered by these settings. The API runs it in the background, so
+    the result is not visible immediately.
 
     Args:
         sport_id: ID of the sport settings to apply
-        oldest_date: Oldest date to apply settings to (optional, defaults to all)
 
     Returns:
         Result of applying settings
@@ -177,17 +286,25 @@ async def apply_sport_settings(
     config: ICUConfig = ctx.get_state("config")
 
     try:
+        sport_id_value = _as_int(sport_id, "sport_id")
+        assert sport_id_value is not None
+
         async with ICUClient(config) as client:
-            result = await client.apply_sport_settings(sport_id, oldest=oldest_date)
+            result = await client.apply_sport_settings(sport_id_value)
 
             return ResponseBuilder.build_response(
-                result,
+                {"sport_id": sport_id_value, "result": result},
                 metadata={
                     "type": "sport_settings_applied",
-                    "message": "Sport settings applied to activities successfully",
+                    "message": (
+                        "Sport settings queued for reprocessing; "
+                        "intervals.icu applies them to matching activities in the background"
+                    ),
                 },
             )
 
+    except SportSettingsInputError as e:
+        return ResponseBuilder.build_error_response(str(e), error_type="validation_error")
     except ICUAPIError as e:
         return ResponseBuilder.build_error_response(e.message, error_type="api_error")
     except Exception as e:
@@ -195,25 +312,40 @@ async def apply_sport_settings(
 
 
 async def create_sport_settings(
-    sport_type: Annotated[str, "Type of sport (e.g., 'Ride', 'Run', 'Swim')"],
-    ftp: Annotated[int | None, "Functional Threshold Power in watts (for cycling)"] = None,
-    fthr: Annotated[int | None, "Functional Threshold Heart Rate in bpm"] = None,
-    pace_threshold: Annotated[
-        float | None, "Threshold pace in min/km (e.g., 4.5 for 4:30/km)"
+    sport_types: Annotated[
+        str | list[str],
+        "One or more intervals.icu activity types these settings cover "
+        "(e.g. 'Run', or ['Run', 'TrailRun', 'VirtualRun'])",
+    ],
+    ftp: Annotated[int | str | None, "Functional Threshold Power in watts (cycling)"] = None,
+    indoor_ftp: Annotated[int | str | None, "Indoor Functional Threshold Power in watts"] = None,
+    threshold_hr: Annotated[int | str | None, "Threshold heart rate in bpm (LTHR/FTHR)"] = None,
+    max_hr: Annotated[int | str | None, "Maximum heart rate in bpm"] = None,
+    threshold_pace: Annotated[
+        float | str | None,
+        "Threshold pace as 'M:SS' over the sport's pace unit "
+        "(e.g. '4:30' for 4:30/km running, '1:45' for 1:45/100m swimming), "
+        "or a number of seconds",
     ] = None,
-    swim_threshold: Annotated[
-        float | None, "Swim threshold in min/100m (e.g., 1.5 for 1:30/100m)"
+    pace_units: Annotated[
+        str | None,
+        "Pace unit: MINS_KM, MINS_MILE, SECS_100M, SECS_100Y or SECS_500M",
     ] = None,
     ctx: Context | None = None,
 ) -> str:
-    """Create new sport-specific settings.
+    """Create new sport-specific settings for one or more activity types.
+
+    Note that intervals.icu creates the entry with the athlete's default values
+    first, so any thresholds given here are written in a follow-up update.
 
     Args:
-        sport_type: Type of sport (e.g., 'Ride', 'Run', 'Swim')
+        sport_types: Activity types the settings apply to
         ftp: Functional Threshold Power in watts (optional)
-        fthr: Functional Threshold Heart Rate in bpm (optional)
-        pace_threshold: Threshold pace in min/km (optional)
-        swim_threshold: Swim threshold in min/100m (optional)
+        indoor_ftp: Indoor Functional Threshold Power in watts (optional)
+        threshold_hr: Threshold heart rate in bpm (optional)
+        max_hr: Maximum heart rate in bpm (optional)
+        threshold_pace: Threshold pace as 'M:SS' or seconds (optional)
+        pace_units: Unit the pace is measured over (optional)
 
     Returns:
         Created sport settings
@@ -221,49 +353,47 @@ async def create_sport_settings(
     assert ctx is not None
     config: ICUConfig = ctx.get_state("config")
 
+    types = [sport_types] if isinstance(sport_types, str) else list(sport_types)
+    if not types:
+        return ResponseBuilder.build_error_response(
+            "At least one sport type is required", error_type="validation_error"
+        )
+
     try:
         async with ICUClient(config) as client:
-            settings_data: dict[str, Any] = {"type": sport_type}
+            settings = await client.create_sport_settings({"types": types})
 
-            if ftp is not None:
-                settings_data["ftp"] = ftp
-            if fthr is not None:
-                settings_data["fthr"] = fthr
-            if pace_threshold is not None:
-                settings_data["pace_threshold"] = pace_threshold
-            if swim_threshold is not None:
-                settings_data["swim_threshold"] = swim_threshold
+            payload = _build_update_payload(
+                ftp,
+                indoor_ftp,
+                threshold_hr,
+                max_hr,
+                threshold_pace,
+                pace_units,
+                settings.pace_units,
+            )
 
-            settings = await client.create_sport_settings(settings_data)
-
-            result: dict[str, Any] = {
-                "id": settings.id,
-                "type": settings.type,
-            }
-
-            if settings.ftp is not None:
-                result["ftp_watts"] = settings.ftp
-            if settings.fthr is not None:
-                result["fthr_bpm"] = settings.fthr
-            if settings.pace_threshold is not None:
-                pace_secs = settings.pace_threshold * 60
-                minutes = int(pace_secs // 60)
-                seconds = int(pace_secs % 60)
-                result["pace_threshold"] = f"{minutes}:{seconds:02d} /km"
-            if settings.swim_threshold is not None:
-                swim_secs = settings.swim_threshold * 60
-                minutes = int(swim_secs // 60)
-                seconds = int(swim_secs % 60)
-                result["swim_threshold"] = f"{minutes}:{seconds:02d} /100m"
+            if payload:
+                try:
+                    settings = await client.update_sport_settings(settings.id, payload)
+                except ICUAPIError as e:
+                    return ResponseBuilder.build_error_response(
+                        f"Sport settings were created with id {settings.id}, but applying the "
+                        f"thresholds failed: {e.message}. Retry with update_sport_settings or "
+                        f"delete the entry.",
+                        error_type="api_error",
+                    )
 
             return ResponseBuilder.build_response(
-                result,
+                _summarize(settings),
                 metadata={
                     "type": "sport_settings_created",
                     "message": "Sport settings created successfully",
                 },
             )
 
+    except SportSettingsInputError as e:
+        return ResponseBuilder.build_error_response(str(e), error_type="validation_error")
     except ICUAPIError as e:
         return ResponseBuilder.build_error_response(e.message, error_type="api_error")
     except Exception as e:
@@ -271,7 +401,7 @@ async def create_sport_settings(
 
 
 async def delete_sport_settings(
-    sport_id: Annotated[int, "ID of the sport settings to delete"],
+    sport_id: Annotated[int | str, "ID of the sport settings to delete"],
     ctx: Context | None = None,
 ) -> str:
     """Delete sport-specific settings.
@@ -286,17 +416,22 @@ async def delete_sport_settings(
     config: ICUConfig = ctx.get_state("config")
 
     try:
+        sport_id_value = _as_int(sport_id, "sport_id")
+        assert sport_id_value is not None
+
         async with ICUClient(config) as client:
-            await client.delete_sport_settings(sport_id)
+            await client.delete_sport_settings(sport_id_value)
 
             return ResponseBuilder.build_response(
-                {"sport_id": sport_id, "deleted": True},
+                {"sport_id": sport_id_value, "deleted": True},
                 metadata={
                     "type": "sport_settings_deleted",
                     "message": "Sport settings deleted successfully",
                 },
             )
 
+    except SportSettingsInputError as e:
+        return ResponseBuilder.build_error_response(str(e), error_type="validation_error")
     except ICUAPIError as e:
         return ResponseBuilder.build_error_response(e.message, error_type="api_error")
     except Exception as e:

@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 # Type aliases for common enums
 ActivityType = Literal["Ride", "Run", "Swim", "Walk", "Hike", "VirtualRide", "VirtualRun", "Other"]
@@ -17,11 +17,14 @@ class SportSettings(BaseModel):
     """Sport-specific settings for an athlete."""
 
     id: int
-    type: str | None = None
+    types: list[str] = Field(default_factory=list[str])
     ftp: int | None = None
-    fthr: int | None = None
-    pace_threshold: float | None = None
-    swim_threshold: float | None = None
+    indoor_ftp: int | None = None
+    lthr: int | None = None
+    max_hr: int | None = None
+    # Stored by the API in meters per second, regardless of pace_units.
+    threshold_pace: float | None = None
+    pace_units: str | None = None
 
 
 class Athlete(BaseModel):
@@ -38,7 +41,11 @@ class Athlete(BaseModel):
     atl: float | None = None
     tsb: float | None = None
     ramp_rate: float | None = None
-    sport_settings: list[SportSettings] = Field(default_factory=list[SportSettings])
+    # The athlete endpoint is the one place the API uses camelCase for this.
+    sport_settings: list[SportSettings] = Field(
+        default_factory=list[SportSettings],
+        validation_alias=AliasChoices("sportSettings", "sport_settings"),
+    )
 
 
 class AthleteProfile(BaseModel):

@@ -1066,28 +1066,24 @@ class ICUClient:
     async def apply_sport_settings(
         self,
         sport_id: int,
-        oldest: str | None = None,
         athlete_id: str | None = None,
     ) -> dict[str, Any]:
-        """Apply sport settings (zones, thresholds) to historical activities.
+        """Apply sport settings (zones, thresholds) to matching activities.
+
+        The API runs this asynchronously and returns an empty body.
 
         Args:
             sport_id: Sport settings ID
-            oldest: Oldest date to apply settings to (ISO-8601 format)
             athlete_id: Athlete ID (uses config default if not provided)
 
         Returns:
             Result of applying settings
         """
         athlete_id = athlete_id or self.config.intervals_icu_athlete_id
-        params = {}
-        if oldest:
-            params["oldest"] = oldest
-
         response = await self._request(
-            "POST", f"/athlete/{athlete_id}/sport-settings/{sport_id}/apply", params=params
+            "PUT", f"/athlete/{athlete_id}/sport-settings/{sport_id}/apply"
         )
-        return response.json()
+        return response.json() if response.content else {}
 
     async def create_sport_settings(
         self,
@@ -1096,8 +1092,12 @@ class ICUClient:
     ) -> SportSettings:
         """Create new sport settings.
 
+        The API only accepts ``types`` here and fills everything else with the
+        athlete's defaults; thresholds must be set afterwards via
+        :meth:`update_sport_settings`.
+
         Args:
-            settings_data: Sport settings data dictionary
+            settings_data: Sport settings data dictionary, requires "types"
             athlete_id: Athlete ID (uses config default if not provided)
 
         Returns:
