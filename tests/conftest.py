@@ -33,10 +33,6 @@ def mock_athlete_data():
         "name": "Test Athlete",
         "email": "test@example.com",
         "weight": 70.0,
-        "ctl": 50.0,
-        "atl": 35.0,
-        "tsb": 15.0,
-        "ramp_rate": 3.5,
         "sport_settings": [
             {
                 "id": 1,
@@ -46,6 +42,27 @@ def mock_athlete_data():
             }
         ],
     }
+
+
+@pytest.fixture
+def mock_fitness_wellness_data():
+    """Wellness records carrying the fitness metrics (CTL/ATL/TSB live here, not on the athlete)."""
+    return [
+        {
+            "id": "2025-10-12",
+            "ctl": 48.0,
+            "atl": 40.0,
+            "tsb": 8.0,
+            "rampRate": 3.5,
+        },
+        {
+            "id": "2025-10-13",
+            "ctl": 50.0,
+            "atl": 35.0,
+            "tsb": 15.0,
+            "rampRate": 3.5,
+        },
+    ]
 
 
 @pytest.fixture
