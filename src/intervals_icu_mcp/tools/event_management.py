@@ -13,7 +13,9 @@ from ..response_builder import ResponseBuilder
 async def create_event(
     start_date: Annotated[str, "Start date in YYYY-MM-DD format"],
     name: Annotated[str, "Event name"],
-    category: Annotated[str, "Event category: WORKOUT, NOTE, RACE, RACE_A, RACE_B, RACE_C, or GOAL"],
+    category: Annotated[
+        str, "Event category: WORKOUT, NOTE, RACE, RACE_A, RACE_B, RACE_C, or GOAL"
+    ],
     description: Annotated[str | None, "Event description (optional)"] = None,
     event_type: Annotated[str | None, "Activity type (e.g., Ride, Run, Swim)"] = None,
     duration_seconds: Annotated[int | None, "Planned duration in seconds"] = None,

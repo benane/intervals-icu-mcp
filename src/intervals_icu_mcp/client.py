@@ -91,7 +91,9 @@ class ICUClient:
         try:
             return adapter.validate_python(data)
         except ValidationError as e:
-            raise ICUAPIError(f"Unexpected API response format: {e.error_count()} validation error(s)") from e
+            raise ICUAPIError(
+                f"Unexpected API response format: {e.error_count()} validation error(s)"
+            ) from e
 
     async def _request(
         self,
@@ -737,7 +739,9 @@ class ICUClient:
         if streams:
             params["types"] = ",".join(streams)
 
-        response = await self._request("GET", f"/activity/{activity_id}/streams.json", params=params)
+        response = await self._request(
+            "GET", f"/activity/{activity_id}/streams.json", params=params
+        )
         data = response.json()
         # API returns list[{type, name, data}], remap to ActivityStreams fields
         if isinstance(data, list):

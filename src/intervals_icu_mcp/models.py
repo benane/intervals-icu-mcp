@@ -273,7 +273,7 @@ class DataCurveSet(BaseModel):
             return []
         curve = self.curves[0]
         pts = []
-        for i, (sec, val) in enumerate(zip(curve.secs, curve.values)):
+        for i, (sec, val) in enumerate(zip(curve.secs, curve.values, strict=False)):
             activity_id = curve.activity_id[i] if i < len(curve.activity_id) else None
             kwargs: dict[str, Any] = {"secs": sec, "src_activity_id": activity_id}
             kwargs[value_field] = val

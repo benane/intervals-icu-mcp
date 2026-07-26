@@ -181,8 +181,10 @@ async def get_fitness_summary(
                 if record.ctl is not None:
                     ctl = record.ctl
                     atl = record.atl
-                    tsb = record.tsb if record.tsb is not None else (
-                        round(ctl - atl, 1) if ctl is not None and atl is not None else None
+                    tsb = (
+                        record.tsb
+                        if record.tsb is not None
+                        else (round(ctl - atl, 1) if ctl is not None and atl is not None else None)
                     )
                     ramp_rate = record.ramp_rate
                     break

@@ -1,6 +1,6 @@
 """Calendar and event tools for Intervals.icu MCP server."""
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Annotated, Any
 
 from fastmcp import Context
