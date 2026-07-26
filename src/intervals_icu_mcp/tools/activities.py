@@ -11,18 +11,25 @@ from ..response_builder import ResponseBuilder
 
 
 async def get_recent_activities(
-    limit: Annotated[int, "Number of activities to fetch"] = 30,
-    days_back: Annotated[int, "Number of days to look back"] = 30,
+    limit: Annotated[int, "Number of activities to fetch (default 30, max 1000)"] = 30,
+    days_back: Annotated[int, "Number of days to look back (default 90)"] = 90,
+    before_date: Annotated[
+        str | None, "Fetch activities before this date (YYYY-MM-DD), e.g. '2024-12-31'"
+    ] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get recent activities for the authenticated athlete.
 
     Returns a summary of recent activities including key metrics like distance,
-    duration, power, heart rate, and training load.
+    duration, power, heart rate, and training load. Supports fetching more than
+    100 activities via automatic pagination (multiple API calls).
 
     Args:
-        limit: Number of activities to fetch (default 30, max 100)
-        days_back: Number of days to look back (default 30)
+        limit: Number of activities to fetch (default 30, max 1000)
+        days_back: Number of days to look back (default 90)
+        before_date: Optional upper date bound (YYYY-MM-DD). Use together with
+            days_back to target a specific historical period, e.g. before_date="2024-12-31"
+            with days_back=365 fetches all of 2024.
 
     Returns:
         JSON string with activity summaries
@@ -30,68 +37,93 @@ async def get_recent_activities(
     assert ctx is not None
     config: ICUConfig = ctx.get_state("config")
 
+    limit = min(limit, 1000)
+
     if days_back < 1:
         return ResponseBuilder.build_error_response(
             "days_back must be at least 1", error_type="validation_error"
         )
 
     try:
-        # Calculate date range
-        oldest_date = datetime.now() - timedelta(days=days_back)
-        oldest = oldest_date.strftime("%Y-%m-%d")
+        # Calculate lower date bound
+        if before_date:
+            anchor = datetime.strptime(before_date, "%Y-%m-%d")
+        else:
+            anchor = datetime.now()
+        oldest = (anchor - timedelta(days=days_back)).strftime("%Y-%m-%d")
+
+        # Pagination: collect activities in batches of 100
+        all_activities = []
+        current_newest: str | None = before_date
 
         async with ICUClient(config) as client:
-            activities = await client.get_activities(
-                oldest=oldest,
-                limit=min(limit, 100),  # Cap at 100
-            )
-
-            if not activities:
-                return ResponseBuilder.build_response(
-                    data={"activities": [], "count": 0},
-                    metadata={"message": "No activities found"},
+            while len(all_activities) < limit:
+                batch_size = min(100, limit - len(all_activities))
+                batch = await client.get_activities(
+                    oldest=oldest,
+                    newest=current_newest,
+                    limit=batch_size,
                 )
 
-            activities_data: list[dict[str, Any]] = []
-            for activity in activities:
-                activity_item: dict[str, Any] = {
-                    "id": activity.id,
-                    "name": activity.name or "Untitled",
-                    "start_date": activity.start_date_local,
-                    "type": activity.type,
-                }
+                if not batch:
+                    break
 
-                if activity.distance:
-                    activity_item["distance_meters"] = activity.distance
+                all_activities.extend(batch)
 
-                if activity.moving_time:
-                    activity_item["moving_time_seconds"] = activity.moving_time
+                # If we got fewer than requested, we've reached the end
+                if len(batch) < batch_size:
+                    break
 
-                if activity.total_elevation_gain:
-                    activity_item["elevation_gain_meters"] = activity.total_elevation_gain
+                # Advance cursor: 1 second before the oldest activity in this batch
+                oldest_in_batch = min(batch, key=lambda a: a.start_date_local)
+                current_newest = (oldest_in_batch.start_date_local - timedelta(seconds=1)).strftime(
+                    "%Y-%m-%dT%H:%M:%S"
+                )
 
-                # Performance metrics
-                if activity.average_watts:
-                    activity_item["average_watts"] = activity.average_watts
-                if activity.normalized_power:
-                    activity_item["normalized_power"] = activity.normalized_power
-                if activity.average_heartrate:
-                    activity_item["average_heartrate"] = activity.average_heartrate
-                if activity.average_cadence:
-                    activity_item["average_cadence"] = activity.average_cadence
-
-                # Training load
-                if activity.icu_training_load:
-                    activity_item["training_load"] = activity.icu_training_load
-                if activity.icu_intensity:
-                    activity_item["intensity_factor"] = activity.icu_intensity
-
-                activities_data.append(activity_item)
-
+        if not all_activities:
             return ResponseBuilder.build_response(
-                data={"activities": activities_data, "count": len(activities_data)},
-                query_type="recent_activities",
+                data={"activities": [], "count": 0},
+                metadata={"message": "No activities found"},
             )
+
+        activities_data: list[dict[str, Any]] = []
+        for activity in all_activities:
+            activity_item: dict[str, Any] = {
+                "id": activity.id,
+                "name": activity.name or "Untitled",
+                "start_date": activity.start_date_local,
+                "type": activity.type,
+            }
+
+            if activity.distance:
+                activity_item["distance_meters"] = activity.distance
+
+            if activity.moving_time:
+                activity_item["moving_time_seconds"] = activity.moving_time
+
+            if activity.total_elevation_gain:
+                activity_item["elevation_gain_meters"] = activity.total_elevation_gain
+
+            if activity.average_watts:
+                activity_item["average_watts"] = activity.average_watts
+            if activity.normalized_power:
+                activity_item["normalized_power"] = activity.normalized_power
+            if activity.average_heartrate:
+                activity_item["average_heartrate"] = activity.average_heartrate
+            if activity.average_cadence:
+                activity_item["average_cadence"] = activity.average_cadence
+
+            if activity.icu_training_load:
+                activity_item["training_load"] = activity.icu_training_load
+            if activity.icu_intensity:
+                activity_item["intensity_factor"] = activity.icu_intensity
+
+            activities_data.append(activity_item)
+
+        return ResponseBuilder.build_response(
+            data={"activities": activities_data, "count": len(activities_data)},
+            query_type="recent_activities",
+        )
 
     except ICUAPIError as e:
         return ResponseBuilder.build_error_response(e.message, error_type="api_error")

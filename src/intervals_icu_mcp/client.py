@@ -177,7 +177,7 @@ class ICUClient:
             List of ActivitySummary objects
         """
         athlete_id = athlete_id or self.config.intervals_icu_athlete_id
-        params = {}
+        params: dict[str, str | int] = {"limit": min(limit, 100)}
 
         if oldest:
             params["oldest"] = oldest
@@ -186,10 +186,7 @@ class ICUClient:
 
         response = await self._request("GET", f"/athlete/{athlete_id}/activities", params=params)
         adapter = TypeAdapter(list[ActivitySummary])
-        activities = self._parse(adapter, response.json())
-
-        # Limit results
-        return activities[:limit]
+        return self._parse(adapter, response.json())
 
     async def get_activity(self, athlete_id: str | None = None, activity_id: str = "") -> Activity:
         """Get detailed activity information.
