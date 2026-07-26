@@ -1,5 +1,7 @@
 """Sport-specific settings tools for FTP, threshold HR, and threshold pace."""
 
+import difflib
+import json
 from typing import Annotated, Any
 
 from fastmcp import Context
@@ -29,6 +31,23 @@ PACE_UNIT_LABELS: dict[str, str] = {
 
 DEFAULT_PACE_UNITS = "MINS_KM"
 
+# The activity types intervals.icu accepts in a "types" array. Worth checking
+# before sending: the API answers an unknown type with HTTP 400 "JSON parse
+# error", which says nothing about the actual problem.
+SPORT_TYPES: tuple[str, ...] = (
+    "Ride", "Run", "Swim", "WeightTraining", "Hike", "Walk", "AlpineSki", "BackcountrySki",
+    "Badminton", "Canoeing", "Crossfit", "EBikeRide", "EMountainBikeRide", "Elliptical", "Golf",
+    "GravelRide", "TrackRide", "Handcycle", "HighIntensityIntervalTraining", "Hockey",
+    "IceSkate", "InlineSkate", "Kayaking", "Kitesurf", "MountainBikeRide", "NordicSki",
+    "OpenWaterSwim", "Padel", "Pilates", "Pickleball", "Racquetball", "Rugby", "RockClimbing",
+    "RollerSki", "Rowing", "Sail", "Skateboard", "Snowboard", "Snowshoe", "Soccer", "Squash",
+    "StairStepper", "StandUpPaddling", "Surfing", "TableTennis", "Tennis", "TrailRun",
+    "Transition", "Velomobile", "VirtualRide", "VirtualRow", "VirtualRun", "VirtualSki",
+    "WaterSport", "Wheelchair", "Windsurf", "Workout", "Yoga", "Other",
+)  # fmt: skip
+
+_SPORT_TYPES_BY_LOWER = {name.lower(): name for name in SPORT_TYPES}
+
 
 class SportSettingsInputError(ValueError):
     """Raised when a tool argument cannot be interpreted."""
@@ -46,6 +65,57 @@ def _as_int(value: int | str | None, field: str) -> int | None:
         return int(float(value.strip()))
     except (ValueError, AttributeError):
         raise SportSettingsInputError(f"{field} must be a number, got {value!r}") from None
+
+
+def _parse_sport_types(value: str | list[str]) -> list[str]:
+    """Normalise the sport types argument into a list of valid activity type names.
+
+    Accepts a real list, a single type, a comma-separated list, or a JSON array
+    that arrived as a string because the client serialised it that way. No type
+    name contains a comma, so splitting on one is unambiguous.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("["):
+            try:
+                decoded = json.loads(text)
+            except json.JSONDecodeError:
+                raise SportSettingsInputError(
+                    f"sport_types looks like a list but is not valid JSON: {value!r}"
+                ) from None
+            if not isinstance(decoded, list):
+                raise SportSettingsInputError(
+                    f"sport_types must be a sport type or a list of them, got {value!r}"
+                )
+            raw = decoded
+        else:
+            raw = text.split(",")
+    else:
+        raw = list(value)
+
+    types: list[str] = []
+    for item in raw:
+        name = str(item).strip()
+        if not name:
+            continue
+        known = _SPORT_TYPES_BY_LOWER.get(name.lower())
+        if known is None:
+            hint = difflib.get_close_matches(name, SPORT_TYPES, n=3, cutoff=0.5)
+            suggestion = (
+                f" Did you mean {' or '.join(hint)}?"
+                if hint
+                else " Common ones are Ride, Run, Swim, Walk, Hike and WeightTraining."
+            )
+            raise SportSettingsInputError(
+                f"{name!r} is not an intervals.icu activity type.{suggestion}"
+            )
+        if known not in types:
+            types.append(known)
+
+    if not types:
+        raise SportSettingsInputError("At least one sport type is required")
+
+    return types
 
 
 def _pace_to_mps(value: float | str, units: str, field: str) -> float:
@@ -353,14 +423,22 @@ async def create_sport_settings(
     assert ctx is not None
     config: ICUConfig = ctx.get_state("config")
 
-    types = [sport_types] if isinstance(sport_types, str) else list(sport_types)
-    if not types:
-        return ResponseBuilder.build_error_response(
-            "At least one sport type is required", error_type="validation_error"
-        )
-
     try:
+        types = _parse_sport_types(sport_types)
+
         async with ICUClient(config) as client:
+            # An activity type belongs to exactly one entry, and the API rejects a
+            # duplicate with a message that does not name the entry holding it.
+            taken = {t: s.id for s in await client.get_sport_settings() for t in s.types}
+            clashes = {t: taken[t] for t in types if t in taken}
+            if clashes:
+                held = ", ".join(f"{t} (id {sid})" for t, sid in sorted(clashes.items()))
+                return ResponseBuilder.build_error_response(
+                    f"Already covered by existing sport settings: {held}. "
+                    f"Use update_sport_settings on that id to change its thresholds.",
+                    error_type="validation_error",
+                )
+
             settings = await client.create_sport_settings({"types": types})
 
             payload = _build_update_payload(

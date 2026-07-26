@@ -11,6 +11,7 @@ from intervals_icu_mcp.tools.sport_settings import (
     _as_int,
     _build_update_payload,
     _pace_to_mps,
+    _parse_sport_types,
     create_sport_settings,
     format_pace,
     get_sport_settings,
@@ -86,6 +87,47 @@ class TestIntCoercion:
     def test_non_numeric_is_rejected(self, value):
         with pytest.raises(SportSettingsInputError):
             _as_int(value, "ftp")
+
+
+class TestSportTypeParsing:
+    """An unknown type makes the API answer HTTP 400 "JSON parse error"."""
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (["Run"], ["Run"]),
+            ("Run", ["Run"]),
+            # Clients that serialise arrays as strings must not end up sending
+            # the literal '["Run"]' as a type name.
+            ('["Run"]', ["Run"]),
+            ('["Run", "TrailRun"]', ["Run", "TrailRun"]),
+            ("  Run  ", ["Run"]),
+            ("Run,TrailRun", ["Run", "TrailRun"]),
+            ("Run, TrailRun", ["Run", "TrailRun"]),
+            ("run", ["Run"]),
+            ("trailrun", ["TrailRun"]),
+            (["Run", "Run"], ["Run"]),
+        ],
+    )
+    def test_accepted_forms(self, value, expected):
+        assert _parse_sport_types(value) == expected
+
+    def test_unknown_type_suggests_a_close_match(self):
+        with pytest.raises(SportSettingsInputError, match="TrailRun"):
+            _parse_sport_types("TrialRun")
+
+    def test_unknown_type_without_close_match_lists_common_ones(self):
+        with pytest.raises(SportSettingsInputError, match="Common ones"):
+            _parse_sport_types("Radfahren")
+
+    def test_broken_json_array_is_reported_as_such(self):
+        with pytest.raises(SportSettingsInputError, match="not valid JSON"):
+            _parse_sport_types('["Run"]x')
+
+    @pytest.mark.parametrize("value", ["[]", [], "", ["  "]])
+    def test_empty_input_is_rejected(self, value):
+        with pytest.raises(SportSettingsInputError):
+            _parse_sport_types(value)
 
 
 class TestUpdatePayload:
@@ -172,57 +214,103 @@ class TestUpdateSportSettings:
 
 
 class TestCreateSportSettings:
-    async def test_posts_types_array_then_applies_values(self, mock_ctx, respx_mock, run_settings):
-        created = {**run_settings, "lthr": 173, "threshold_pace": None}
-        post = respx_mock.post("/athlete/i123456/sport-settings").mock(
-            return_value=Response(200, json=created)
+    @pytest.fixture
+    def rowing_settings(self):
+        """A free activity type, i.e. one no existing entry claims."""
+        return {"id": 43, "types": ["Rowing"], "pace_units": "MINS_KM"}
+
+    @pytest.fixture(autouse=True)
+    def existing_settings(self, respx_mock, run_settings):
+        """create_sport_settings first checks which types are already claimed."""
+        return respx_mock.get("/athlete/i123456/sport-settings").mock(
+            return_value=Response(200, json=[run_settings])
         )
-        put = respx_mock.put("/athlete/i123456/sport-settings/42").mock(
-            return_value=Response(200, json=run_settings)
+
+    async def test_posts_types_array_then_applies_values(
+        self, mock_ctx, respx_mock, rowing_settings
+    ):
+        post = respx_mock.post("/athlete/i123456/sport-settings").mock(
+            return_value=Response(200, json=rowing_settings)
+        )
+        put = respx_mock.put("/athlete/i123456/sport-settings/43").mock(
+            return_value=Response(200, json={**rowing_settings, "lthr": 170})
         )
 
         result = json.loads(
             await create_sport_settings(
-                sport_types="Run", threshold_hr="170", threshold_pace="4:30", ctx=mock_ctx
+                sport_types="Rowing", threshold_hr="170", threshold_pace="4:30", ctx=mock_ctx
             )
         )
 
         # The API rejects a create without "types" ("Missing types") and ignores
         # any thresholds sent alongside, so values go out in a follow-up update.
-        assert json.loads(post.calls.last.request.content) == {"types": ["Run"]}
+        assert json.loads(post.calls.last.request.content) == {"types": ["Rowing"]}
         put_body = json.loads(put.calls.last.request.content)
         assert put_body["lthr"] == 170
         assert put_body["threshold_pace"] == pytest.approx(1000 / 270)
-        assert result["data"]["types"] == ["Run", "TrailRun"]
+        assert result["data"]["types"] == ["Rowing"]
 
-    async def test_accepts_a_list_of_types(self, mock_ctx, respx_mock, run_settings):
+    @pytest.mark.parametrize(
+        "types_arg",
+        [
+            ["Rowing", "VirtualRow"],
+            '["Rowing", "VirtualRow"]',
+            "Rowing,VirtualRow",
+            "Rowing, VirtualRow",
+        ],
+    )
+    async def test_accepts_every_shape_a_client_might_send(
+        self, mock_ctx, respx_mock, rowing_settings, types_arg
+    ):
         post = respx_mock.post("/athlete/i123456/sport-settings").mock(
-            return_value=Response(200, json=run_settings)
+            return_value=Response(200, json=rowing_settings)
         )
 
-        await create_sport_settings(sport_types=["Run", "TrailRun"], ctx=mock_ctx)
+        await create_sport_settings(sport_types=types_arg, ctx=mock_ctx)
 
-        assert json.loads(post.calls.last.request.content) == {"types": ["Run", "TrailRun"]}
+        assert json.loads(post.calls.last.request.content) == {"types": ["Rowing", "VirtualRow"]}
 
-    async def test_skips_update_when_no_values_given(self, mock_ctx, respx_mock, run_settings):
+    async def test_type_already_claimed_points_at_the_existing_entry(self, mock_ctx, respx_mock):
+        post = respx_mock.post("/athlete/i123456/sport-settings")
+
+        result = json.loads(await create_sport_settings(sport_types="Run", ctx=mock_ctx))
+
+        assert result["error"]["type"] == "validation_error"
+        assert "42" in result["error"]["message"]
+        assert "update_sport_settings" in result["error"]["message"]
+        assert not post.called
+
+    async def test_unknown_type_never_reaches_the_api(self, mock_ctx, respx_mock):
+        post = respx_mock.post("/athlete/i123456/sport-settings")
+
+        result = json.loads(await create_sport_settings(sport_types="Bogus", ctx=mock_ctx))
+
+        assert result["error"]["type"] == "validation_error"
+        assert not post.called
+
+    async def test_skips_update_when_no_values_given(self, mock_ctx, respx_mock, rowing_settings):
         respx_mock.post("/athlete/i123456/sport-settings").mock(
-            return_value=Response(200, json=run_settings)
+            return_value=Response(200, json=rowing_settings)
         )
-        put = respx_mock.put("/athlete/i123456/sport-settings/42")
+        put = respx_mock.put("/athlete/i123456/sport-settings/43")
 
-        await create_sport_settings(sport_types="Run", ctx=mock_ctx)
+        await create_sport_settings(sport_types="Rowing", ctx=mock_ctx)
 
         assert not put.called
 
-    async def test_reports_id_when_follow_up_update_fails(self, mock_ctx, respx_mock, run_settings):
+    async def test_reports_id_when_follow_up_update_fails(
+        self, mock_ctx, respx_mock, rowing_settings
+    ):
         respx_mock.post("/athlete/i123456/sport-settings").mock(
-            return_value=Response(200, json=run_settings)
+            return_value=Response(200, json=rowing_settings)
         )
-        respx_mock.put("/athlete/i123456/sport-settings/42").mock(
+        respx_mock.put("/athlete/i123456/sport-settings/43").mock(
             return_value=Response(422, json={"error": "nope"})
         )
 
-        result = json.loads(await create_sport_settings(sport_types="Run", ftp=250, ctx=mock_ctx))
+        result = json.loads(
+            await create_sport_settings(sport_types="Rowing", ftp=250, ctx=mock_ctx)
+        )
 
         assert result["error"]["type"] == "api_error"
-        assert "42" in result["error"]["message"]
+        assert "43" in result["error"]["message"]
