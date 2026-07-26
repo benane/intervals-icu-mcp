@@ -446,6 +446,119 @@ async def bulk_delete_events(
         )
 
 
+async def bulk_update_events(
+    event_ids: Annotated[str, "JSON array of event IDs to update (e.g., '[123, 456, 789]')"],
+    name: Annotated[str | None, "New name to apply to all events"] = None,
+    description: Annotated[str | None, "New description to apply to all events"] = None,
+    event_type: Annotated[str | None, "New activity type to apply to all events"] = None,
+    duration_seconds: Annotated[int | None, "New planned duration in seconds"] = None,
+    distance_meters: Annotated[float | None, "New planned distance in meters"] = None,
+    training_load: Annotated[int | None, "New planned training load"] = None,
+    ctx: Context | None = None,
+) -> str:
+    """Apply the same update to multiple calendar events at once.
+
+    Useful for bulk-renaming events, updating workout notes for recurring sessions
+    (e.g. a daily stretching routine), or changing the type/duration of a series.
+    Only the fields you provide will be changed — all other fields stay as-is.
+
+    Args:
+        event_ids: JSON array of event IDs (integers)
+        name: New name to set on every event
+        description: New description/notes to set on every event
+        event_type: New activity type (e.g. "Run", "Ride", "Swim")
+        duration_seconds: New planned duration
+        distance_meters: New planned distance
+        training_load: New planned training load
+
+    Returns:
+        JSON string with a summary of updated and failed events
+    """
+    assert ctx is not None
+    config: ICUConfig = ctx.get_state("config")
+
+    import json
+
+    try:
+        parsed_ids = json.loads(event_ids)
+    except json.JSONDecodeError as e:
+        return ResponseBuilder.build_error_response(
+            f"Invalid JSON format: {str(e)}", error_type="validation_error"
+        )
+
+    if not isinstance(parsed_ids, list):
+        return ResponseBuilder.build_error_response(
+            "Event IDs must be a JSON array", error_type="validation_error"
+        )
+
+    if not parsed_ids:
+        return ResponseBuilder.build_error_response(
+            "Must provide at least one event ID", error_type="validation_error"
+        )
+
+    event_data: dict[str, Any] = {}
+    if name is not None:
+        event_data["name"] = name
+    if description is not None:
+        event_data["description"] = description
+    if event_type is not None:
+        event_data["type"] = event_type
+    if duration_seconds is not None:
+        event_data["moving_time"] = duration_seconds
+    if distance_meters is not None:
+        event_data["distance"] = distance_meters
+    if training_load is not None:
+        event_data["icu_training_load"] = training_load
+
+    if not event_data:
+        return ResponseBuilder.build_error_response(
+            "No fields provided to update. Please specify at least one field to change.",
+            error_type="validation_error",
+        )
+
+    ids_list: list[int] = parsed_ids  # type: ignore[assignment]
+    updated: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+
+    try:
+        async with ICUClient(config) as client:
+            for event_id in ids_list:
+                try:
+                    event = await client.update_event(event_id, event_data)
+                    updated.append(
+                        {
+                            "id": event.id,
+                            "start_date": event.start_date_local,
+                            "name": event.name,
+                        }
+                    )
+                except ICUAPIError as e:
+                    failed.append({"id": event_id, "error": e.message})
+                except Exception as e:
+                    failed.append({"id": event_id, "error": str(e)})
+
+        summary = f"Updated {len(updated)} of {len(ids_list)} events"
+        if failed:
+            summary += f", {len(failed)} failed"
+
+        return ResponseBuilder.build_response(
+            data={"updated": updated, "failed": failed},
+            query_type="bulk_update_events",
+            metadata={
+                "message": summary,
+                "total": len(ids_list),
+                "updated_count": len(updated),
+                "failed_count": len(failed),
+                "fields_changed": list(event_data.keys()),
+            },
+        )
+
+    except Exception as e:
+        return ResponseBuilder.build_error_response(
+            f"Unexpected error: {str(e)}", error_type="internal_error"
+        )
+
+
 async def duplicate_event(
     event_id: Annotated[int, "Event ID to duplicate"],
     new_date: Annotated[str, "New date for the duplicated event (YYYY-MM-DD format)"],

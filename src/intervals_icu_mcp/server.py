@@ -44,6 +44,7 @@ from .tools.curves import get_hr_curves, get_pace_curves
 from .tools.event_management import (
     bulk_create_events,
     bulk_delete_events,
+    bulk_update_events,
     create_event,
     delete_event,
     duplicate_event,
@@ -109,6 +110,7 @@ mcp.tool()(update_event)
 mcp.tool()(delete_event)
 mcp.tool()(bulk_create_events)
 mcp.tool()(bulk_delete_events)
+mcp.tool()(bulk_update_events)
 mcp.tool()(duplicate_event)
 
 # Register performance/curve tools
