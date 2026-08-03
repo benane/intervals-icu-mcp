@@ -1,5 +1,6 @@
 """Activity analysis tools for Intervals.icu MCP server."""
 
+import json
 from typing import Annotated, Any, cast
 
 from fastmcp import Context
@@ -8,12 +9,67 @@ from ..auth import ICUConfig
 from ..client import ICUAPIError, ICUClient
 from ..response_builder import ResponseBuilder
 
+VALID_STREAM_TYPES = frozenset(
+    {
+        "watts",
+        "heartrate",
+        "cadence",
+        "velocity_smooth",
+        "altitude",
+        "distance",
+        "time",
+        "latlng",
+        "temp",
+        "moving",
+        "grade_smooth",
+    }
+)
+
+
+def _normalize_streams(streams: "list[str] | str | None") -> list[str] | None:
+    """Coerce the streams filter into a clean list[str], accepting common variants.
+
+    Some MCP clients serialize a list argument as a single string instead of a
+    JSON array (either a comma-separated list like "watts,heartrate" or a
+    Python-repr list like "['watts', 'heartrate']"). Rather than reject those
+    with a schema error, normalize them here so the filter behaves the same
+    either way.
+    """
+    if streams is None:
+        return None
+
+    items: list[str]
+    if isinstance(streams, str):
+        text = streams.strip()
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                parsed = json.loads(text.replace("'", '"'))
+            except json.JSONDecodeError:
+                text = text[1:-1]
+                items = [part.strip().strip("'\"") for part in text.split(",")]
+            else:
+                if isinstance(parsed, list):
+                    parsed_list = cast("list[Any]", parsed)
+                    items = [str(parsed_list[i]) for i in range(len(parsed_list))]
+                else:
+                    items = [text]
+        else:
+            items = text.split(",")
+    else:
+        items = list(streams)
+
+    return [item.strip() for item in items if item and item.strip()]
+
 
 async def get_activity_streams(
     activity_id: Annotated[str, "Activity ID to fetch streams for"],
     streams: Annotated[
-        list[str] | None,
-        "List of stream types (e.g., ['watts', 'heartrate', 'cadence']). If not specified, all streams are fetched.",
+        list[str] | str | None,
+        "Stream types to fetch, e.g. [\"watts\", \"heartrate\", \"distance\"] "
+        "(a comma-separated string like \"watts,heartrate,distance\" also works). "
+        "If not specified, ALL streams are fetched, including latlng — for long "
+        "activities this can be very large, so pass an explicit list whenever "
+        "you only need specific metrics.",
     ] = None,
     ctx: Context | None = None,
 ) -> str:
@@ -38,7 +94,7 @@ async def get_activity_streams(
 
     Args:
         activity_id: The unique ID of the activity
-        streams: Optional list of specific stream types to fetch
+        streams: Optional list (or comma-separated string) of specific stream types to fetch
 
     Returns:
         JSON string with time-series data streams
@@ -46,9 +102,19 @@ async def get_activity_streams(
     assert ctx is not None
     config: ICUConfig = ctx.get_state("config")
 
+    normalized_streams = _normalize_streams(streams)
+    if normalized_streams:
+        unknown = [s for s in normalized_streams if s not in VALID_STREAM_TYPES]
+        if unknown:
+            return ResponseBuilder.build_error_response(
+                f"Unknown stream type(s): {', '.join(unknown)}. "
+                f"Valid types are: {', '.join(sorted(VALID_STREAM_TYPES))}",
+                error_type="validation_error",
+            )
+
     try:
         async with ICUClient(config) as client:
-            streams_data = await client.get_activity_streams(activity_id, streams)
+            streams_data = await client.get_activity_streams(activity_id, normalized_streams)
 
             # Count available streams
             available_streams: list[str] = []
@@ -158,10 +224,16 @@ async def get_activity_intervals(
                     performance["average_watts"] = interval.average_watts
                 if interval.weighted_average_watts:
                     performance["normalized_power"] = interval.weighted_average_watts
+                if interval.max_watts is not None:
+                    performance["max_watts"] = interval.max_watts
+                if interval.min_watts is not None:
+                    performance["min_watts"] = interval.min_watts
                 if interval.average_heartrate:
                     performance["average_heartrate"] = interval.average_heartrate
                 if interval.max_heartrate:
                     performance["max_heartrate"] = interval.max_heartrate
+                if interval.min_heartrate:
+                    performance["min_heartrate"] = interval.min_heartrate
                 if interval.average_cadence:
                     performance["average_cadence"] = interval.average_cadence
                 if interval.average_speed:
@@ -170,6 +242,10 @@ async def get_activity_intervals(
                     performance["distance_meters"] = interval.distance
                 if interval.training_load:
                     performance["training_load"] = interval.training_load
+                # Decoupling (Pw:HR / Pace:HR drift, first half vs. second half) is only
+                # meaningful for steady work efforts, matching the intervals.icu UI.
+                if interval.type == "WORK" and interval.decoupling is not None:
+                    performance["decoupling_percent"] = interval.decoupling
 
                 if performance:
                     interval_item["performance"] = performance

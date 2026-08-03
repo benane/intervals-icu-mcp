@@ -365,12 +365,15 @@ class Interval(BaseModel):
     average_watts: int | None = None
     weighted_average_watts: int | None = None  # Normalized power equivalent
     max_watts: int | None = None
+    min_watts: int | None = None
     average_heartrate: int | None = None
     max_heartrate: int | None = None
+    min_heartrate: int | None = None
     average_cadence: float | None = None
     average_speed: float | None = None
     total_elevation_gain: float | None = None
     training_load: float | None = None
+    decoupling: float | None = None  # Pw:HR (or Pace:HR) drift, % first half vs second half
     group_id: str | None = None
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
