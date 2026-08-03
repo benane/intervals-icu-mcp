@@ -8,13 +8,13 @@ A Model Context Protocol (MCP) server for Intervals.icu integration. Access your
 
 ## Overview
 
-This MCP server provides 48 tools to interact with your Intervals.icu account, organized into 9 categories:
+This MCP server provides 49 tools to interact with your Intervals.icu account, organized into 9 categories:
 
 - Activities (10 tools) - Query, search, update, delete, and download activities
 - Activity Analysis (8 tools) - Deep dive into streams, intervals, best efforts, and histograms
 - Athlete (2 tools) - Access profile, fitness metrics, and training load
 - Wellness (3 tools) - Track and update recovery, HRV, sleep, and health metrics
-- Events/Calendar (9 tools) - Manage planned workouts, races, notes with bulk operations
+- Events/Calendar (10 tools) - Manage planned workouts, races, notes with bulk operations
 - Performance/Curves (3 tools) - Analyze power, heart rate, and pace curves
 - Workout Library (2 tools) - Browse and explore workout templates and plans
 - Gear Management (6 tools) - Track equipment and maintenance reminders
@@ -179,10 +179,10 @@ Use built-in prompt templates for common queries (available via prompt suggestio
 ### Activity Analysis
 
 ```
-"Show me the power data from yesterday's ride"
+"Show me just the power and heart rate data from yesterday's ride"
 "What were my best efforts in my last race?"
 "Find similar interval workouts to my last session"
-"Show me the intervals from my workout on Tuesday"
+"Show me the intervals from my workout on Tuesday, including HR decoupling per interval"
 "Get the power histogram for my last ride"
 "Show me the heart rate distribution for that workout"
 ```
@@ -213,6 +213,7 @@ _Note: The athlete profile resource (`intervals-icu://athlete/profile`) automati
 "Delete the workout on Saturday"
 "Duplicate this week's plan for next week"
 "Create 5 workouts for my build phase"
+"Rename all my planned rides this week to 'Endurance Ride'"
 ```
 
 ### Performance Analysis
@@ -254,7 +255,7 @@ _Note: The athlete profile resource (`intervals-icu://athlete/profile`) automati
 
 | Tool                     | Description                                       |
 | ------------------------ | ------------------------------------------------- |
-| `get-recent-activities`  | List recent activities with summary metrics       |
+| `get-recent-activities`  | List recent activities with summary metrics (paginated, optional `before_date` filter) |
 | `get-activity-details`   | Get comprehensive details for a specific activity |
 | `search-activities`      | Search activities by name or tag                  |
 | `search-activities-full` | Search activities with full details               |
@@ -269,8 +270,8 @@ _Note: The athlete profile resource (`intervals-icu://athlete/profile`) automati
 
 | Tool                     | Description                                                   |
 | ------------------------ | ------------------------------------------------------------- |
-| `get-activity-streams`   | Get time-series data (power, HR, cadence, altitude, GPS)      |
-| `get-activity-intervals` | Get structured workout intervals with targets and performance |
+| `get-activity-streams`   | Get time-series data (power, HR, cadence, altitude, GPS); pass `streams` to fetch only the metrics you need |
+| `get-activity-intervals` | Get structured workout intervals with targets and performance, including min/max HR & power and per-interval decoupling % |
 | `get-best-efforts`       | Find peak performances across all durations in an activity    |
 | `search-intervals`       | Find similar intervals across activity history                |
 | `get-power-histogram`    | Get power distribution histogram for an activity              |
@@ -293,7 +294,7 @@ _Note: The athlete profile resource (`intervals-icu://athlete/profile`) automati
 | `get-wellness-for-date` | Get complete wellness data for a specific date                      |
 | `update-wellness`       | Update or create wellness data for a date                           |
 
-### Events/Calendar (9 tools)
+### Events/Calendar (10 tools)
 
 | Tool                    | Description                                                |
 | ----------------------- | ---------------------------------------------------------- |
@@ -305,6 +306,7 @@ _Note: The athlete profile resource (`intervals-icu://athlete/profile`) automati
 | `delete-event`          | Remove events from calendar                                |
 | `bulk-create-events`    | Create multiple events in a single operation               |
 | `bulk-delete-events`    | Delete multiple events in a single operation               |
+| `bulk-update-events`    | Apply the same update to multiple events at once           |
 | `duplicate-event`       | Duplicate an event to a new date                           |
 
 ### Performance/Curves (3 tools)
