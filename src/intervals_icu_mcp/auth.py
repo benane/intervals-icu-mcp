@@ -18,6 +18,7 @@ class ICUConfig(BaseSettings):
 
     intervals_icu_api_key: str = ""
     intervals_icu_athlete_id: str = ""
+    intervals_icu_known_athletes: str = ""
 
 
 def load_config() -> ICUConfig:
@@ -44,6 +45,30 @@ def validate_credentials(config: ICUConfig) -> bool:
     if not config.intervals_icu_athlete_id or config.intervals_icu_athlete_id == "i123456":
         return False
     return True
+
+
+def parse_known_athletes(raw: str) -> list[tuple[str, str]]:
+    """Parse the INTERVALS_ICU_KNOWN_ATHLETES env var into (id, label) pairs.
+
+    Format: comma-separated "id:label" pairs, e.g. "i186312:Benedikt,i222222:Partnerin".
+
+    Args:
+        raw: Raw env var value.
+
+    Returns:
+        List of (athlete_id, label) tuples. Empty list if raw is empty.
+    """
+    pairs: list[tuple[str, str]] = []
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        athlete_id, _, label = entry.partition(":")
+        athlete_id = athlete_id.strip()
+        label = label.strip() or athlete_id
+        if athlete_id:
+            pairs.append((athlete_id, label))
+    return pairs
 
 
 def update_env_key(api_key: str, athlete_id: str | None = None) -> None:

@@ -39,7 +39,7 @@ from .tools.activity_analysis import (
     get_power_histogram,
     search_intervals,
 )
-from .tools.athlete import get_athlete_profile, get_fitness_summary
+from .tools.athlete import get_athlete_profile, get_fitness_summary, list_athletes
 from .tools.curves import get_hr_curves, get_pace_curves
 from .tools.event_management import (
     bulk_create_events,
@@ -96,6 +96,7 @@ mcp.tool()(get_gap_histogram)
 # Register athlete tools
 mcp.tool()(get_athlete_profile)
 mcp.tool()(get_fitness_summary)
+mcp.tool()(list_athletes)
 
 # Register wellness tools
 mcp.tool()(get_wellness_data)

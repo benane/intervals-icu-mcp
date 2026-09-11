@@ -8,11 +8,11 @@ A Model Context Protocol (MCP) server for Intervals.icu integration. Access your
 
 ## Overview
 
-This MCP server provides 49 tools to interact with your Intervals.icu account, organized into 9 categories:
+This MCP server provides 50 tools to interact with your Intervals.icu account, organized into 9 categories:
 
 - Activities (10 tools) - Query, search, update, delete, and download activities
 - Activity Analysis (8 tools) - Deep dive into streams, intervals, best efforts, and histograms
-- Athlete (2 tools) - Access profile, fitness metrics, and training load
+- Athlete (3 tools) - Access profile, fitness metrics, training load, and list accessible athletes
 - Wellness (3 tools) - Track and update recovery, HRV, sleep, and health metrics
 - Events/Calendar (10 tools) - Manage planned workouts, races, notes with bulk operations
 - Performance/Curves (3 tools) - Analyze power, heart rate, and pace curves
@@ -74,6 +74,8 @@ Create a `.env` file manually:
 ```bash
 INTERVALS_ICU_API_KEY=your_api_key_here
 INTERVALS_ICU_ATHLETE_ID=i123456
+# Optional: other athletes shared with you (comma-separated "id:label" pairs)
+# INTERVALS_ICU_KNOWN_ATHLETES=i186312:Me,i222222:Partner
 ```
 
 ### Option 2: Using Docker
@@ -279,12 +281,13 @@ _Note: The athlete profile resource (`intervals-icu://athlete/profile`) automati
 | `get-pace-histogram`     | Get pace distribution histogram for an activity               |
 | `get-gap-histogram`      | Get grade-adjusted pace histogram for an activity             |
 
-### Athlete (2 tools)
+### Athlete (3 tools)
 
-| Tool                  | Description                                                     |
-| --------------------- | --------------------------------------------------------------- |
-| `get-athlete-profile` | Get athlete profile with fitness metrics and sport settings     |
-| `get-fitness-summary` | Get detailed CTL/ATL/TSB analysis with training recommendations |
+| Tool                  | Description                                                                |
+| --------------------- | --------------------------------------------------------------------------- |
+| `get-athlete-profile` | Get athlete profile with fitness metrics and sport settings                 |
+| `get-fitness-summary` | Get detailed CTL/ATL/TSB analysis with training recommendations             |
+| `list-athletes`       | List athletes accessible with your API key (your own + INTERVALS_ICU_KNOWN_ATHLETES) |
 
 ### Wellness (3 tools)
 

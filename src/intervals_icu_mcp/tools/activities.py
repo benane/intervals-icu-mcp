@@ -9,6 +9,11 @@ from ..auth import ICUConfig
 from ..client import ICUAPIError, ICUClient
 from ..response_builder import ResponseBuilder
 
+_ATHLETE_ID_DOC = (
+    "Athlete ID (e.g. 'i186312' or '186312'). Omit for your own athlete. "
+    "Use list_athletes to see which athletes you can access."
+)
+
 
 async def get_recent_activities(
     limit: Annotated[int, "Number of activities to fetch (default 30, max 1000)"] = 30,
@@ -16,13 +21,15 @@ async def get_recent_activities(
     before_date: Annotated[
         str | None, "Fetch activities before this date (YYYY-MM-DD), e.g. '2024-12-31'"
     ] = None,
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
-    """Get recent activities for the authenticated athlete.
+    """Get recent activities for an athlete.
 
     Returns a summary of recent activities including key metrics like distance,
     duration, power, heart rate, and training load. Supports fetching more than
-    100 activities via automatic pagination (multiple API calls).
+    100 activities via automatic pagination (multiple API calls). Defaults to
+    the authenticated athlete if no athlete_id is given.
 
     Args:
         limit: Number of activities to fetch (default 30, max 1000)
@@ -30,6 +37,7 @@ async def get_recent_activities(
         before_date: Optional upper date bound (YYYY-MM-DD). Use together with
             days_back to target a specific historical period, e.g. before_date="2024-12-31"
             with days_back=365 fetches all of 2024.
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with activity summaries
@@ -60,6 +68,7 @@ async def get_recent_activities(
             while len(all_activities) < limit:
                 batch_size = min(100, limit - len(all_activities))
                 batch = await client.get_activities(
+                    athlete_id=athlete_id,
                     oldest=oldest,
                     newest=current_newest,
                     limit=batch_size,
@@ -126,7 +135,7 @@ async def get_recent_activities(
         )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"
@@ -269,16 +278,19 @@ async def get_activity_details(
 async def search_activities(
     query: Annotated[str, "Search query (activity name or tag)"],
     limit: Annotated[int, "Maximum number of results to return"] = 30,
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
     """Search for activities by name or tag.
 
-    Searches the athlete's activity history for matching activities based on
+    Searches an athlete's activity history for matching activities based on
     name or tags. Useful for finding specific workouts or activity types.
+    Defaults to the authenticated athlete if no athlete_id is given.
 
     Args:
         query: Search term (e.g., "threshold", "long run", "race")
         limit: Maximum number of results (default 30)
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with matching activities
@@ -295,6 +307,7 @@ async def search_activities(
     try:
         async with ICUClient(config) as client:
             results = await client.search_activities(
+                athlete_id=athlete_id,
                 query=query,
                 limit=min(limit, 100),  # Cap at 100
             )
@@ -328,7 +341,7 @@ async def search_activities(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"
@@ -671,17 +684,20 @@ async def download_gpx_file(
 async def search_activities_full(
     query: Annotated[str, "Search query (activity name or tag)"],
     limit: Annotated[int, "Maximum number of results to return"] = 30,
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
     """Search for activities by name or tag, returning complete activity details.
 
     Unlike the basic search, this returns full Activity objects with all metrics,
     power data, heart rate, training load, and more. Use this when you need
-    detailed information about matching activities.
+    detailed information about matching activities. Defaults to the
+    authenticated athlete if no athlete_id is given.
 
     Args:
         query: Search term (e.g., "threshold", "long run", "race", "#interval")
         limit: Maximum number of results (default 30)
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with complete activity details for matches
@@ -698,6 +714,7 @@ async def search_activities_full(
     try:
         async with ICUClient(config) as client:
             activities = await client.search_activities_full(
+                athlete_id=athlete_id,
                 query=query,
                 limit=min(limit, 100),
             )
@@ -756,7 +773,7 @@ async def search_activities_full(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"
@@ -766,17 +783,20 @@ async def search_activities_full(
 async def get_activities_around(
     activity_id: Annotated[str, "Reference activity ID"],
     count: Annotated[int, "Number of activities before and after"] = 5,
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get activities before and after a specific activity for context.
 
     Retrieves activities chronologically surrounding a reference activity.
     Useful for understanding training context, progression, or finding
-    related workouts.
+    related workouts. Defaults to the authenticated athlete if no athlete_id
+    is given.
 
     Args:
         activity_id: The ID of the reference activity
         count: Number of activities to retrieve before and after (default 5)
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with activities around the reference activity
@@ -788,6 +808,7 @@ async def get_activities_around(
         async with ICUClient(config) as client:
             activities = await client.get_activities_around(
                 activity_id=activity_id,
+                athlete_id=athlete_id,
                 count=count,
             )
 
@@ -863,7 +884,7 @@ async def get_activities_around(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"

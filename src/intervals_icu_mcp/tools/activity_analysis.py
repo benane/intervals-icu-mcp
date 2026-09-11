@@ -65,8 +65,8 @@ async def get_activity_streams(
     activity_id: Annotated[str, "Activity ID to fetch streams for"],
     streams: Annotated[
         list[str] | str | None,
-        "Stream types to fetch, e.g. [\"watts\", \"heartrate\", \"distance\"] "
-        "(a comma-separated string like \"watts,heartrate,distance\" also works). "
+        'Stream types to fetch, e.g. ["watts", "heartrate", "distance"] '
+        '(a comma-separated string like "watts,heartrate,distance" also works). '
         "If not specified, ALL streams are fetched, including latlng — for long "
         "activities this can be very large, so pass an explicit list whenever "
         "you only need specific metrics.",
@@ -362,19 +362,26 @@ async def search_intervals(
     min_duration: Annotated[int | None, "Minimum duration in seconds"] = None,
     max_duration: Annotated[int | None, "Maximum duration in seconds"] = None,
     limit: Annotated[int, "Maximum number of results to return"] = 30,
+    athlete_id: Annotated[
+        str | None,
+        "Athlete ID (e.g. 'i186312' or '186312'). Omit for your own athlete. "
+        "Use list_athletes to see which athletes you can access.",
+    ] = None,
     ctx: Context | None = None,
 ) -> str:
     """Search for similar intervals across all activities.
 
-    Finds intervals matching specific criteria across your activity history.
-    Useful for tracking progress on specific workout types or finding comparable
-    training sessions.
+    Finds intervals matching specific criteria across an athlete's activity
+    history. Useful for tracking progress on specific workout types or
+    finding comparable training sessions. Defaults to the authenticated
+    athlete if no athlete_id is given.
 
     Args:
         interval_type: Type of interval (e.g., "WORK", "THRESHOLD", "VO2MAX")
         min_duration: Minimum interval duration in seconds
         max_duration: Maximum interval duration in seconds
         limit: Maximum number of results to return (default 30)
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with matching intervals
@@ -385,6 +392,7 @@ async def search_intervals(
     try:
         async with ICUClient(config) as client:
             results = await client.search_intervals(
+                athlete_id=athlete_id,
                 interval_type=interval_type,
                 min_duration=min_duration,
                 max_duration=max_duration,
@@ -423,7 +431,7 @@ async def search_intervals(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"

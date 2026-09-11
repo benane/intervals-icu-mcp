@@ -9,6 +9,11 @@ from ..auth import ICUConfig
 from ..client import ICUAPIError, ICUClient
 from ..response_builder import ResponseBuilder
 
+_ATHLETE_ID_DOC = (
+    "Athlete ID (e.g. 'i186312' or '186312'). Omit for your own athlete. "
+    "Use list_athletes to see which athletes you can access."
+)
+
 
 async def get_hr_curves(
     days_back: Annotated[int | None, "Number of days to analyze (optional)"] = None,
@@ -16,6 +21,7 @@ async def get_hr_curves(
         str | None,
         "Time period shorthand: 'week', 'month', 'year', 'all' (optional)",
     ] = None,
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get heart rate curve data showing best efforts for various durations.
@@ -24,12 +30,14 @@ async def get_hr_curves(
     different time durations (e.g., 5 seconds, 1 minute, 5 minutes, 20 minutes).
 
     Useful for tracking cardiovascular fitness improvements and identifying HR zones
-    across different effort durations.
+    across different effort durations. Defaults to the authenticated athlete if
+    no athlete_id is given.
 
     Args:
         days_back: Number of days to analyze (overrides time_period)
         time_period: Time period shorthand - 'week' (7 days), 'month' (30 days),
                      'year' (365 days), 'all' (all time). Default is 90 days.
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with HR curve data
@@ -71,7 +79,7 @@ async def get_hr_curves(
             period_label = "90_days"
 
         async with ICUClient(config) as client:
-            hr_curve = await client.get_hr_curves(oldest=oldest)
+            hr_curve = await client.get_hr_curves(athlete_id=athlete_id, oldest=oldest)
 
             if not hr_curve.data or len(hr_curve.data) == 0:
                 return ResponseBuilder.build_response(
@@ -174,7 +182,7 @@ async def get_hr_curves(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"
@@ -188,6 +196,7 @@ async def get_pace_curves(
         "Time period shorthand: 'week', 'month', 'year', 'all' (optional)",
     ] = None,
     use_gap: Annotated[bool, "Use Grade Adjusted Pace (GAP) for running"] = False,
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get pace curve data showing best efforts for various durations.
@@ -196,13 +205,15 @@ async def get_pace_curves(
     different time durations (e.g., 400m, 1km, 5km, 10km).
 
     Useful for tracking running fitness and race predictions. Can use Grade Adjusted Pace
-    (GAP) to normalize for hills.
+    (GAP) to normalize for hills. Defaults to the authenticated athlete if no
+    athlete_id is given.
 
     Args:
         days_back: Number of days to analyze (overrides time_period)
         time_period: Time period shorthand - 'week' (7 days), 'month' (30 days),
                      'year' (365 days), 'all' (all time). Default is 90 days.
         use_gap: Use Grade Adjusted Pace (GAP) for running to account for hills
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with pace curve data
@@ -244,7 +255,9 @@ async def get_pace_curves(
             period_label = "90_days"
 
         async with ICUClient(config) as client:
-            pace_curve = await client.get_pace_curves(oldest=oldest, use_gap=use_gap)
+            pace_curve = await client.get_pace_curves(
+                athlete_id=athlete_id, oldest=oldest, use_gap=use_gap
+            )
 
             if not pace_curve.data or len(pace_curve.data) == 0:
                 return ResponseBuilder.build_response(
@@ -334,7 +347,7 @@ async def get_pace_curves(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"

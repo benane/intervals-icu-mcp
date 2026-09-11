@@ -225,9 +225,19 @@ async def _find_settings(client: ICUClient, sport_id: int) -> SportSettings | No
 
 
 async def get_sport_settings(
+    athlete_id: Annotated[
+        str | None,
+        "Athlete ID (e.g. 'i186312' or '186312'). Omit for your own athlete. "
+        "Use list_athletes to see which athletes you can access.",
+    ] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get all sport-specific settings (FTP, threshold HR, threshold pace, zones).
+
+    Defaults to the authenticated athlete if no athlete_id is given.
+
+    Args:
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         Formatted list of sport settings with thresholds
@@ -237,7 +247,7 @@ async def get_sport_settings(
 
     try:
         async with ICUClient(config) as client:
-            settings_list = await client.get_sport_settings()
+            settings_list = await client.get_sport_settings(athlete_id=athlete_id)
 
             if not settings_list:
                 return ResponseBuilder.build_response(
@@ -250,7 +260,7 @@ async def get_sport_settings(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(str(e), error_type="unexpected_error")
 

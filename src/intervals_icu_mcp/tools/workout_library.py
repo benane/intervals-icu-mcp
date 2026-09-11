@@ -8,16 +8,26 @@ from ..auth import ICUConfig
 from ..client import ICUAPIError, ICUClient
 from ..response_builder import ResponseBuilder
 
+_ATHLETE_ID_DOC = (
+    "Athlete ID (e.g. 'i186312' or '186312'). Omit for your own athlete. "
+    "Use list_athletes to see which athletes you can access."
+)
+
 
 async def get_workout_library(
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get workout library folders and training plans.
 
-    Returns all workout folders and training plans available to you, including
-    your personal workouts, shared workouts, and any training plans you follow.
+    Returns all workout folders and training plans available to an athlete,
+    including personal workouts, shared workouts, and any training plans
+    followed. Defaults to the authenticated athlete if no athlete_id is given.
 
-    Each folder contains structured workouts that can be applied to your calendar.
+    Each folder contains structured workouts that can be applied to the calendar.
+
+    Args:
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with workout folders/plans
@@ -27,7 +37,7 @@ async def get_workout_library(
 
     try:
         async with ICUClient(config) as client:
-            folders = await client.get_workout_folders()
+            folders = await client.get_workout_folders(athlete_id=athlete_id)
 
             if not folders:
                 return ResponseBuilder.build_response(
@@ -84,7 +94,7 @@ async def get_workout_library(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"
@@ -93,15 +103,18 @@ async def get_workout_library(
 
 async def get_workouts_in_folder(
     folder_id: Annotated[int, "Folder ID to get workouts from"],
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get all workouts in a specific folder or training plan.
 
     Returns detailed information about all workouts stored in a folder,
-    including their structure, intensity, and training load.
+    including their structure, intensity, and training load. Defaults to the
+    authenticated athlete if no athlete_id is given.
 
     Args:
         folder_id: ID of the folder to browse
+        athlete_id: Athlete ID the folder belongs to (defaults to your own athlete)
 
     Returns:
         JSON string with workout details
@@ -111,7 +124,7 @@ async def get_workouts_in_folder(
 
     try:
         async with ICUClient(config) as client:
-            workouts = await client.get_workouts_in_folder(folder_id)
+            workouts = await client.get_workouts_in_folder(folder_id, athlete_id=athlete_id)
 
             if not workouts:
                 return ResponseBuilder.build_response(
@@ -181,7 +194,7 @@ async def get_workouts_in_folder(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"

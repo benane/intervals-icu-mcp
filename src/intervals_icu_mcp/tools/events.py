@@ -9,20 +9,28 @@ from ..auth import ICUConfig
 from ..client import ICUAPIError, ICUClient
 from ..response_builder import ResponseBuilder
 
+_ATHLETE_ID_DOC = (
+    "Athlete ID (e.g. 'i186312' or '186312'). Omit for your own athlete. "
+    "Use list_athletes to see which athletes you can access."
+)
+
 
 async def get_calendar_events(
     days_ahead: Annotated[int, "Number of days to look ahead"] = 7,
     days_back: Annotated[int, "Number of days to look back"] = 0,
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get planned events and workouts from the calendar.
 
     Returns calendar events including planned workouts, notes, races, and goals
-    for the specified time period.
+    for the specified time period. Defaults to the authenticated athlete if no
+    athlete_id is given.
 
     Args:
         days_ahead: Number of days to look ahead (default 7)
         days_back: Number of days to look back (default 0)
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with calendar events
@@ -40,6 +48,7 @@ async def get_calendar_events(
 
         async with ICUClient(config) as client:
             events = await client.get_events(
+                athlete_id=athlete_id,
                 oldest=oldest,
                 newest=newest,
             )
@@ -138,7 +147,7 @@ async def get_calendar_events(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"
@@ -147,15 +156,18 @@ async def get_calendar_events(
 
 async def get_upcoming_workouts(
     limit: Annotated[int, "Maximum number of workouts to return"] = 7,
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get upcoming planned workouts from the calendar.
 
     Returns only workout events (filters out notes, races, goals) for the
-    upcoming days. Useful for seeing what training is planned ahead.
+    upcoming days. Useful for seeing what training is planned ahead. Defaults
+    to the authenticated athlete if no athlete_id is given.
 
     Args:
         limit: Maximum number of workouts to return (default 7)
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with upcoming workouts
@@ -171,6 +183,7 @@ async def get_upcoming_workouts(
 
         async with ICUClient(config) as client:
             events = await client.get_events(
+                athlete_id=athlete_id,
                 oldest=oldest,
                 newest=newest,
             )
@@ -244,7 +257,7 @@ async def get_upcoming_workouts(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"
@@ -253,15 +266,18 @@ async def get_upcoming_workouts(
 
 async def get_event(
     event_id: Annotated[int, "Event ID to retrieve"],
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get detailed information for a specific calendar event.
 
     Returns complete details for a single event including all metrics, descriptions,
-    and workout structure.
+    and workout structure. Defaults to the authenticated athlete if no
+    athlete_id is given.
 
     Args:
         event_id: The unique ID of the event
+        athlete_id: Athlete ID the event belongs to (defaults to your own athlete)
 
     Returns:
         JSON string with event details
@@ -271,7 +287,7 @@ async def get_event(
 
     try:
         async with ICUClient(config) as client:
-            event = await client.get_event(event_id)
+            event = await client.get_event(event_id, athlete_id=athlete_id)
 
             event_data: dict[str, Any] = {
                 "id": event.id,
@@ -326,7 +342,7 @@ async def get_event(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"

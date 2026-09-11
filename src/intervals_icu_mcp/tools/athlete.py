@@ -1,23 +1,33 @@
 """Athlete profile and fitness tools for Intervals.icu MCP server."""
 
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
 from fastmcp import Context
 
-from ..auth import ICUConfig
+from ..auth import ICUConfig, parse_known_athletes
 from ..client import ICUAPIError, ICUClient
-from ..response_builder import ResponseBuilder
+from ..response_builder import ResponseBuilder, athlete_error_message
 from .sport_settings import format_pace
+
+_ATHLETE_ID_DOC = (
+    "Athlete ID (e.g. 'i186312' or '186312'). Omit for your own athlete. "
+    "Use list_athletes to see which athletes you can access."
+)
 
 
 async def get_athlete_profile(
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
-    """Get the authenticated athlete's profile information.
+    """Get an athlete's profile information.
 
     Returns athlete profile including personal details, sport settings,
-    and current fitness metrics (CTL, ATL, TSB).
+    and current fitness metrics (CTL, ATL, TSB). Defaults to the
+    authenticated athlete if no athlete_id is given.
+
+    Args:
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with athlete profile data
@@ -27,7 +37,7 @@ async def get_athlete_profile(
 
     try:
         async with ICUClient(config) as client:
-            athlete = await client.get_athlete()
+            athlete = await client.get_athlete(athlete_id=athlete_id)
 
             # Build profile data
             profile: dict[str, Any] = {
@@ -128,11 +138,7 @@ async def get_athlete_profile(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(
-            e.message,
-            error_type="api_error",
-            suggestions=["Check your API key and athlete ID configuration"],
-        )
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}",
@@ -141,9 +147,10 @@ async def get_athlete_profile(
 
 
 async def get_fitness_summary(
+    athlete_id: Annotated[str | None, _ATHLETE_ID_DOC] = None,
     ctx: Context | None = None,
 ) -> str:
-    """Get the athlete's current fitness, fatigue, and form metrics.
+    """Get an athlete's current fitness, fatigue, and form metrics.
 
     Returns a comprehensive summary of training load metrics including:
     - CTL (Chronic Training Load / Fitness)
@@ -151,7 +158,11 @@ async def get_fitness_summary(
     - TSB (Training Stress Balance / Form)
     - Ramp Rate (rate of fitness change)
 
-    Includes interpretations to help understand training status.
+    Includes interpretations to help understand training status. Defaults to
+    the authenticated athlete if no athlete_id is given.
+
+    Args:
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with fitness summary and recommendations
@@ -161,14 +172,16 @@ async def get_fitness_summary(
 
     try:
         async with ICUClient(config) as client:
-            athlete = await client.get_athlete()
+            athlete = await client.get_athlete(athlete_id=athlete_id)
 
             # CTL/ATL/TSB come from Wellness data, not the Athlete profile.
             # Fetch the last 7 days to find the most recent entry with data.
             today = datetime.now().date()
             oldest = (today - timedelta(days=7)).isoformat()
             newest = today.isoformat()
-            wellness_records = await client.get_wellness(oldest=oldest, newest=newest)
+            wellness_records = await client.get_wellness(
+                athlete_id=athlete_id, oldest=oldest, newest=newest
+            )
 
             # Find the most recent record that has CTL data
             ctl: float | None = None
@@ -299,12 +312,65 @@ async def get_fitness_summary(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(
-            e.message,
-            error_type="api_error",
-        )
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}",
             error_type="internal_error",
         )
+
+
+async def list_athletes(
+    ctx: Context | None = None,
+) -> str:
+    """List the athletes accessible with the configured API key.
+
+    Always includes your own athlete. Additional athletes come from the
+    INTERVALS_ICU_KNOWN_ATHLETES environment variable (comma-separated
+    "id:label" pairs, e.g. "i186312:Me,i222222:Partner") and are validated
+    live against the API - each entry reports whether access currently works.
+    Pass the returned id as athlete_id to any tool that supports it.
+
+    Returns:
+        JSON string with one entry per known athlete
+    """
+    assert ctx is not None
+    config: ICUConfig = ctx.get_state("config")
+
+    own_id = config.intervals_icu_athlete_id
+    candidates: list[tuple[str, str]] = [(own_id, "your own athlete")]
+    seen_ids = {own_id}
+    for known_id, label in parse_known_athletes(config.intervals_icu_known_athletes):
+        if known_id not in seen_ids:
+            candidates.append((known_id, label))
+            seen_ids.add(known_id)
+
+    athletes: list[dict[str, Any]] = []
+    async with ICUClient(config) as client:
+        for candidate_id, label in candidates:
+            entry: dict[str, Any] = {
+                "id": candidate_id,
+                "label": label,
+                "is_own_athlete": candidate_id == own_id,
+            }
+            try:
+                athlete = await client.get_athlete(athlete_id=candidate_id)
+                entry["accessible"] = True
+                entry["name"] = athlete.name
+                if athlete.sport_settings:
+                    ftp_values = [s.ftp for s in athlete.sport_settings if s.ftp]
+                    if ftp_values:
+                        entry["ftp"] = max(ftp_values)
+                    sport_types = [s.types for s in athlete.sport_settings if s.types]
+                    if sport_types:
+                        entry["sports"] = sport_types
+            except ICUAPIError as e:
+                entry["accessible"] = False
+                entry["error"], _ = athlete_error_message(e, candidate_id)
+
+            athletes.append(entry)
+
+    return ResponseBuilder.build_response(
+        data={"athletes": athletes, "count": len(athletes)},
+        query_type="list_athletes",
+    )

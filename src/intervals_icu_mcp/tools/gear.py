@@ -10,9 +10,19 @@ from ..response_builder import ResponseBuilder
 
 
 async def get_gear_list(
+    athlete_id: Annotated[
+        str | None,
+        "Athlete ID (e.g. 'i186312' or '186312'). Omit for your own athlete. "
+        "Use list_athletes to see which athletes you can access.",
+    ] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get all gear items with usage statistics and maintenance reminders.
+
+    Defaults to the authenticated athlete if no athlete_id is given.
+
+    Args:
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         Formatted list of all gear with details, usage stats, and reminders
@@ -22,7 +32,7 @@ async def get_gear_list(
 
     try:
         async with ICUClient(config) as client:
-            gear_list = await client.get_gear()
+            gear_list = await client.get_gear(athlete_id=athlete_id)
 
             if not gear_list:
                 return ResponseBuilder.build_response(
@@ -101,7 +111,7 @@ async def get_gear_list(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(str(e), error_type="unexpected_error")
 

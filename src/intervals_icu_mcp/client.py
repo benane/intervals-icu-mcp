@@ -82,6 +82,23 @@ class ICUClient:
         if self._client:
             await self._client.aclose()
 
+    def _resolve_athlete_id(self, athlete_id: str | None) -> str:
+        """Normalize an athlete id, falling back to the configured default athlete.
+
+        Accepts "i186312", "186312", "0", "me", or empty/None - the latter three
+        all resolve to the athlete the API key belongs to.
+
+        Args:
+            athlete_id: Raw athlete id as given by a caller, or None.
+
+        Returns:
+            Normalized athlete id (always "i"-prefixed).
+        """
+        if not athlete_id or athlete_id.strip().lower() in ("0", "me"):
+            return self.config.intervals_icu_athlete_id
+        normalized = athlete_id.strip()
+        return f"i{normalized}" if normalized.isdigit() else normalized
+
     def _parse(self, adapter: TypeAdapter[Any], data: Any) -> Any:
         """Parse API response data with a Pydantic TypeAdapter.
 
@@ -124,6 +141,9 @@ class ICUClient:
             if response.status_code == 401:
                 raise ICUAPIError("Unauthorized. Check your API key and athlete ID.", 401)
 
+            if response.status_code == 403:
+                raise ICUAPIError("Access denied.", 403)
+
             if response.status_code == 404:
                 raise ICUAPIError("Resource not found.", 404)
 
@@ -152,7 +172,7 @@ class ICUClient:
         Returns:
             Athlete model with full profile information
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request("GET", f"/athlete/{athlete_id}")
         return Athlete(**response.json())
 
@@ -176,7 +196,7 @@ class ICUClient:
         Returns:
             List of ActivitySummary objects
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         params: dict[str, str | int] = {"limit": min(limit, 100)}
 
         if oldest:
@@ -198,7 +218,7 @@ class ICUClient:
         Returns:
             Activity model with full details
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request("GET", f"/activity/{activity_id}")
         return Activity(**response.json())
 
@@ -218,7 +238,7 @@ class ICUClient:
         Returns:
             List of ActivitySearchResult objects
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         params = {"q": query}
 
         response = await self._request(
@@ -245,7 +265,7 @@ class ICUClient:
         Returns:
             List of full Activity objects
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         params = {"q": query}
 
         response = await self._request(
@@ -272,7 +292,7 @@ class ICUClient:
         Returns:
             List of Activity objects around the reference activity
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         params = {"id": activity_id, "count": count}
 
         response = await self._request(
@@ -436,7 +456,7 @@ class ICUClient:
         Returns:
             List of Wellness records
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         params = {}
 
         if oldest:
@@ -462,7 +482,7 @@ class ICUClient:
         Returns:
             Wellness record for the specified date
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request("GET", f"/athlete/{athlete_id}/wellness/{date}")
         return Wellness(**response.json())
 
@@ -480,7 +500,7 @@ class ICUClient:
         Returns:
             Updated Wellness record
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request("PUT", f"/athlete/{athlete_id}/wellness", json=wellness_data)
         return Wellness(**response.json())
 
@@ -500,7 +520,7 @@ class ICUClient:
         Returns:
             Updated Wellness record
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request(
             "PUT", f"/athlete/{athlete_id}/wellness/{date}", json=wellness_data
         )
@@ -520,7 +540,7 @@ class ICUClient:
         Returns:
             List of updated Wellness records
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request(
             "PUT", f"/athlete/{athlete_id}/wellness-bulk", json=wellness_records
         )
@@ -545,7 +565,7 @@ class ICUClient:
         Returns:
             List of Event objects
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         params = {}
 
         if oldest:
@@ -571,7 +591,7 @@ class ICUClient:
         Returns:
             Event object
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request("GET", f"/athlete/{athlete_id}/events/{event_id}")
         return Event(**response.json())
 
@@ -595,7 +615,7 @@ class ICUClient:
         Returns:
             PowerCurve with best efforts data
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         params: dict[str, Any] = {"type": activity_type}
 
         if oldest:
@@ -626,7 +646,7 @@ class ICUClient:
         Returns:
             HRCurve with best efforts data
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         params = {}
 
         if oldest:
@@ -659,7 +679,7 @@ class ICUClient:
         Returns:
             PaceCurve with best efforts data
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         params = {}
 
         if oldest:
@@ -690,7 +710,7 @@ class ICUClient:
         Returns:
             List of folders/plans with workouts
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request("GET", f"/athlete/{athlete_id}/folders")
         adapter = TypeAdapter(list[Folder])
         return self._parse(adapter, response.json())
@@ -800,7 +820,7 @@ class ICUClient:
         Returns:
             List of matching intervals with activity context
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         params = {}
 
         if interval_type:
@@ -832,7 +852,7 @@ class ICUClient:
         Returns:
             List of Workout objects
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request("GET", f"/athlete/{athlete_id}/folders/{folder_id}/workouts")
         adapter = TypeAdapter(list[Workout])
         return self._parse(adapter, response.json())
@@ -853,7 +873,7 @@ class ICUClient:
         Returns:
             Created Event object
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request("POST", f"/athlete/{athlete_id}/events", json=event_data)
         return Event(**response.json())
 
@@ -873,7 +893,7 @@ class ICUClient:
         Returns:
             Updated Event object
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request(
             "PUT", f"/athlete/{athlete_id}/events/{event_id}", json=event_data
         )
@@ -893,7 +913,7 @@ class ICUClient:
         Returns:
             True if deletion was successful
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         await self._request("DELETE", f"/athlete/{athlete_id}/events/{event_id}")
         return True
 
@@ -911,7 +931,7 @@ class ICUClient:
         Returns:
             List of Gear objects
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request("GET", f"/athlete/{athlete_id}/gear")
         adapter = TypeAdapter(list[Gear])
         return self._parse(adapter, response.json())
@@ -930,7 +950,7 @@ class ICUClient:
         Returns:
             Created Gear object
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request("POST", f"/athlete/{athlete_id}/gear", json=gear_data)
         return Gear(**response.json())
 
@@ -950,7 +970,7 @@ class ICUClient:
         Returns:
             Updated Gear object
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request(
             "PUT", f"/athlete/{athlete_id}/gear/{gear_id}", json=gear_data
         )
@@ -970,7 +990,7 @@ class ICUClient:
         Returns:
             True if deletion was successful
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         await self._request("DELETE", f"/athlete/{athlete_id}/gear/{gear_id}")
         return True
 
@@ -990,7 +1010,7 @@ class ICUClient:
         Returns:
             Created GearReminder object
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request(
             "POST", f"/athlete/{athlete_id}/gear/{gear_id}/reminders", json=reminder_data
         )
@@ -1014,7 +1034,7 @@ class ICUClient:
         Returns:
             Updated GearReminder object
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request(
             "PUT",
             f"/athlete/{athlete_id}/gear/{gear_id}/reminders/{reminder_id}",
@@ -1036,7 +1056,7 @@ class ICUClient:
         Returns:
             List of SportSettings objects
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request("GET", f"/athlete/{athlete_id}/sport-settings")
         adapter = TypeAdapter(list[SportSettings])
         return self._parse(adapter, response.json())
@@ -1057,7 +1077,7 @@ class ICUClient:
         Returns:
             Updated SportSettings object
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request(
             "PUT", f"/athlete/{athlete_id}/sport-settings/{sport_id}", json=settings_data
         )
@@ -1079,7 +1099,7 @@ class ICUClient:
         Returns:
             Result of applying settings
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request(
             "PUT", f"/athlete/{athlete_id}/sport-settings/{sport_id}/apply"
         )
@@ -1103,7 +1123,7 @@ class ICUClient:
         Returns:
             Created SportSettings object
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request(
             "POST", f"/athlete/{athlete_id}/sport-settings", json=settings_data
         )
@@ -1123,7 +1143,7 @@ class ICUClient:
         Returns:
             True if deletion was successful
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         await self._request("DELETE", f"/athlete/{athlete_id}/sport-settings/{sport_id}")
         return True
 
@@ -1143,7 +1163,7 @@ class ICUClient:
         Returns:
             List of created Event objects
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request(
             "POST", f"/athlete/{athlete_id}/events/bulk", json=events_data
         )
@@ -1164,7 +1184,7 @@ class ICUClient:
         Returns:
             Result of bulk deletion
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request(
             "PUT", f"/athlete/{athlete_id}/events/bulk-delete", json=[{"id": i} for i in event_ids]
         )
@@ -1186,7 +1206,7 @@ class ICUClient:
         Returns:
             Created Event object
         """
-        athlete_id = athlete_id or self.config.intervals_icu_athlete_id
+        athlete_id = self._resolve_athlete_id(athlete_id)
         response = await self._request(
             "POST",
             f"/athlete/{athlete_id}/events/{event_id}/duplicate",

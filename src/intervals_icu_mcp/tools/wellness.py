@@ -12,6 +12,11 @@ from ..response_builder import ResponseBuilder
 
 async def get_wellness_data(
     days_back: Annotated[int, "Number of days to look back"] = 7,
+    athlete_id: Annotated[
+        str | None,
+        "Athlete ID (e.g. 'i186312' or '186312'). Omit for your own athlete. "
+        "Use list_athletes to see which athletes you can access.",
+    ] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get wellness data for recent days.
@@ -21,6 +26,7 @@ async def get_wellness_data(
 
     Args:
         days_back: Number of days to retrieve (default 7)
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with wellness data
@@ -36,6 +42,7 @@ async def get_wellness_data(
 
         async with ICUClient(config) as client:
             wellness_records = await client.get_wellness(
+                athlete_id=athlete_id,
                 oldest=oldest,
                 newest=newest,
             )
@@ -178,7 +185,7 @@ async def get_wellness_data(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"
@@ -187,6 +194,11 @@ async def get_wellness_data(
 
 async def get_wellness_for_date(
     date: Annotated[str, "Date in YYYY-MM-DD format"],
+    athlete_id: Annotated[
+        str | None,
+        "Athlete ID (e.g. 'i186312' or '186312'). Omit for your own athlete. "
+        "Use list_athletes to see which athletes you can access.",
+    ] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get wellness data for a specific date.
@@ -196,6 +208,7 @@ async def get_wellness_for_date(
 
     Args:
         date: Date in ISO-8601 format (YYYY-MM-DD)
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with wellness data for the date
@@ -214,7 +227,7 @@ async def get_wellness_for_date(
 
     try:
         async with ICUClient(config) as client:
-            wellness = await client.get_wellness_for_date(date=date)
+            wellness = await client.get_wellness_for_date(date=date, athlete_id=athlete_id)
 
             wellness_data: dict[str, Any] = {"date": date}
 
@@ -330,7 +343,7 @@ async def get_wellness_for_date(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"

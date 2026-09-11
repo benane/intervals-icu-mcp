@@ -14,6 +14,40 @@ import json
 from datetime import datetime
 from typing import Any, cast
 
+from .client import ICUAPIError
+
+
+def athlete_error_message(error: ICUAPIError, athlete_id: str | None) -> tuple[str, str]:
+    """Turn a failed athlete-scoped API call into a (message, error_type) pair.
+
+    Only produces an athlete-specific message when the caller explicitly
+    requested a foreign athlete (``athlete_id`` is not None) - errors on the
+    caller's own athlete keep the existing generic message, since there is no
+    foreign id to name.
+
+    Args:
+        error: The ICUAPIError raised by the client
+        athlete_id: The raw athlete_id argument the caller passed (None if the
+            caller used the default/own athlete)
+
+    Returns:
+        (message, error_type) tuple
+    """
+    if athlete_id is not None:
+        if error.status_code == 403:
+            return (
+                f"No access to athlete '{athlete_id}'. It hasn't been shared with "
+                "this API key, or the key isn't authorized for it. Call list_athletes "
+                "to see which athletes are accessible.",
+                "forbidden",
+            )
+        if error.status_code == 404:
+            return f"Athlete '{athlete_id}' does not exist.", "not_found"
+        if error.status_code == 401:
+            return "API key invalid or not configured correctly.", "unauthorized"
+
+    return error.message, "api_error"
+
 
 def _convert_datetimes(obj: Any) -> Any:  # type: ignore[misc]
     """Recursively convert datetime objects to ISO strings."""
@@ -134,3 +168,20 @@ class ResponseBuilder:
             response["error"]["suggestions"] = suggestions
 
         return json.dumps(response, separators=(",", ":"))
+
+    @staticmethod
+    def build_athlete_error_response(error: ICUAPIError, athlete_id: str | None) -> str:
+        """Build an error response for a failed athlete-scoped API call.
+
+        See :func:`athlete_error_message` for how the message is chosen.
+
+        Args:
+            error: The ICUAPIError raised by the client
+            athlete_id: The raw athlete_id argument the tool received (None if
+                the caller used the default/own athlete)
+
+        Returns:
+            JSON string with error structure
+        """
+        message, error_type = athlete_error_message(error, athlete_id)
+        return ResponseBuilder.build_error_response(message, error_type=error_type)

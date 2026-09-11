@@ -20,6 +20,11 @@ async def get_power_curves(
         str,
         "Activity type for the power curve, e.g. 'Ride', 'VirtualRide', 'Run' (default: 'Ride')",
     ] = "Ride",
+    athlete_id: Annotated[
+        str | None,
+        "Athlete ID (e.g. 'i186312' or '186312'). Omit for your own athlete. "
+        "Use list_athletes to see which athletes you can access.",
+    ] = None,
     ctx: Context | None = None,
 ) -> str:
     """Get power curve data showing best efforts for various durations.
@@ -28,12 +33,14 @@ async def get_power_curves(
     different time durations (e.g., 5 seconds, 1 minute, 5 minutes, 20 minutes).
 
     Useful for tracking performance improvements and identifying strengths/weaknesses
-    across different power duration profiles.
+    across different power duration profiles. Defaults to the authenticated
+    athlete if no athlete_id is given.
 
     Args:
         days_back: Number of days to analyze (overrides time_period)
         time_period: Time period shorthand - 'week' (7 days), 'month' (30 days),
                      'year' (365 days), 'all' (all time). Default is 90 days.
+        athlete_id: Athlete ID to query (defaults to your own athlete)
 
     Returns:
         JSON string with power curve data
@@ -75,7 +82,9 @@ async def get_power_curves(
             period_label = "90_days"
 
         async with ICUClient(config) as client:
-            power_curve = await client.get_power_curves(oldest=oldest, activity_type=activity_type)
+            power_curve = await client.get_power_curves(
+                athlete_id=athlete_id, oldest=oldest, activity_type=activity_type
+            )
 
             if not power_curve.data or len(power_curve.data) == 0:
                 return ResponseBuilder.build_response(
@@ -195,7 +204,7 @@ async def get_power_curves(
             )
 
     except ICUAPIError as e:
-        return ResponseBuilder.build_error_response(e.message, error_type="api_error")
+        return ResponseBuilder.build_athlete_error_response(e, athlete_id)
     except Exception as e:
         return ResponseBuilder.build_error_response(
             f"Unexpected error: {str(e)}", error_type="internal_error"
