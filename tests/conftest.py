@@ -12,6 +12,7 @@ def mock_config():
     return ICUConfig(
         intervals_icu_api_key="test_api_key_12345",
         intervals_icu_athlete_id="i123456",
+        intervals_icu_known_athletes="",
     )
 
 
