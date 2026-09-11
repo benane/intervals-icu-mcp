@@ -8,10 +8,10 @@ A Model Context Protocol (MCP) server for Intervals.icu integration. Access your
 
 ## Overview
 
-This MCP server provides 50 tools to interact with your Intervals.icu account, organized into 9 categories:
+This MCP server provides 53 tools to interact with your Intervals.icu account, organized into 9 categories:
 
 - Activities (10 tools) - Query, search, update, delete, and download activities
-- Activity Analysis (8 tools) - Deep dive into streams, intervals, best efforts, and histograms
+- Activity Analysis (11 tools) - Streams, intervals, best efforts, histograms, plus writing intervals and auto-tagging climbs
 - Athlete (3 tools) - Access profile, fitness metrics, training load, and list accessible athletes
 - Wellness (3 tools) - Track and update recovery, HRV, sleep, and health metrics
 - Events/Calendar (10 tools) - Manage planned workouts, races, notes with bulk operations
@@ -268,7 +268,7 @@ _Note: The athlete profile resource (`intervals-icu://athlete/profile`) automati
 | `download-fit-file`      | Download activity as FIT file                     |
 | `download-gpx-file`      | Download activity as GPX file                     |
 
-### Activity Analysis (8 tools)
+### Activity Analysis (11 tools)
 
 | Tool                     | Description                                                   |
 | ------------------------ | ------------------------------------------------------------- |
@@ -276,6 +276,9 @@ _Note: The athlete profile resource (`intervals-icu://athlete/profile`) automati
 | `get-activity-intervals` | Get structured workout intervals with targets and performance, including min/max HR & power and per-interval decoupling % |
 | `get-best-efforts`       | Find peak performances across all durations in an activity    |
 | `search-intervals`       | Find similar intervals across activity history                |
+| `create-intervals`       | Add intervals to an activity (additive; existing intervals are split around the new ones, never deleted) |
+| `replace-intervals`      | Replace the entire interval set of an activity (destructive) |
+| `mark-climbs-as-intervals` | Detect climbs from the elevation profile and write them as labelled `WORK` intervals |
 | `get-power-histogram`    | Get power distribution histogram for an activity              |
 | `get-hr-histogram`       | Get heart rate distribution histogram for an activity         |
 | `get-pace-histogram`     | Get pace distribution histogram for an activity               |

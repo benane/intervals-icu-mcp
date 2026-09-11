@@ -59,6 +59,11 @@ from .tools.gear import (
     update_gear,
     update_gear_reminder,
 )
+from .tools.interval_management import (
+    create_intervals,
+    mark_climbs_as_intervals,
+    replace_intervals,
+)
 from .tools.performance import get_power_curves
 from .tools.sport_settings import (
     apply_sport_settings,
@@ -92,6 +97,11 @@ mcp.tool()(get_power_histogram)
 mcp.tool()(get_hr_histogram)
 mcp.tool()(get_pace_histogram)
 mcp.tool()(get_gap_histogram)
+
+# Register interval write tools
+mcp.tool()(create_intervals)
+mcp.tool()(replace_intervals)
+mcp.tool()(mark_climbs_as_intervals)
 
 # Register athlete tools
 mcp.tool()(get_athlete_profile)

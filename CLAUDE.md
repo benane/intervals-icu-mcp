@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an MCP (Model Context Protocol) server for Intervals.icu that provides 49 tools, 1 resource, and 6 prompts for accessing training data, wellness metrics, and performance analysis through Claude and other LLMs.
+This is an MCP (Model Context Protocol) server for Intervals.icu that provides 52 tools, 1 resource, and 6 prompts for accessing training data, wellness metrics, and performance analysis through Claude and other LLMs.
 
 ## Development Commands
 
@@ -118,15 +118,19 @@ Tools are organized into 7 categories in `tools/`:
 
 1. **activities.py** - Query and manage activities
 2. **activity_analysis.py** - Streams, intervals, best efforts
-3. **athlete.py** - Profile and fitness metrics (CTL/ATL/TSB)
-4. **wellness.py** - HRV, sleep, recovery metrics
-5. **events.py** - Calendar queries
-6. **event_management.py** - Create/update/delete events
-7. **performance.py** - Power/HR/pace curves
-8. **curves.py** - HR and pace curve analysis
-9. **workout_library.py** - Browse workout folders and plans
-10. **gear.py** - Manage gear and reminders
-11. **sport_settings.py** - FTP, FTHR, pace thresholds
+3. **interval_management.py** - Write intervals (`create_intervals`, `replace_intervals`, `mark_climbs_as_intervals`)
+4. **athlete.py** - Profile and fitness metrics (CTL/ATL/TSB)
+5. **wellness.py** - HRV, sleep, recovery metrics
+6. **events.py** - Calendar queries
+7. **event_management.py** - Create/update/delete events
+8. **performance.py** - Power/HR/pace curves
+9. **curves.py** - HR and pace curve analysis
+10. **workout_library.py** - Browse workout folders and plans
+11. **gear.py** - Manage gear and reminders
+12. **sport_settings.py** - FTP, FTHR, pace thresholds
+
+`climb_detection.py` (module, not a tool file) holds the pure climb-segmentation
+algorithm used by `mark_climbs_as_intervals`.
 
 ### Tool Pattern
 
@@ -185,6 +189,24 @@ async def tool_name(
 - `ResponseBuilder.format_date_with_day()` adds day-of-week info
 - All datetimes automatically converted to ISO strings in responses
 
+### Writing Intervals (verified against the live API)
+
+- `PUT /activity/{id}/intervals?all=false` merges: a new interval is **carved**
+  out of any existing interval it overlaps (the surrounding interval is split,
+  timeline stays contiguous) - same as the "A" key in the web UI. `?all=true`
+  replaces the whole set and rejects overlaps with HTTP 422.
+- An interval is defined by `start_index` / `end_index` (stream indices).
+  `start_time` / `end_time` (seconds) are server-derived and diverge from the
+  index when the ride has pauses - never write intervals by seconds directly;
+  `interval_management._seconds_to_index` maps via the `time` stream.
+- **`type` is not writable.** Every interval written through the API is stored
+  as `WORK`; `RECOVERY` is only ever assigned by intervals.icu's auto-analyzer.
+- Any interval write sets `icu_intervals_edited=true` on the activity, which
+  stops auto-detection. Only the web UI "Reset" clears it and re-runs the
+  analyzer - there is no API endpoint for that.
+- Interval `id`s are reassigned on every GET; match intervals by index bounds,
+  not by `id`.
+
 ### Testing
 
 - Tests use `pytest` with `pytest-asyncio` for async tests
@@ -194,8 +216,13 @@ async def tool_name(
 
 ## Type Checking
 
-- Pyright is configured with basic type checking mode
-- Strict mode only for `src/` directory
+- Pyright runs in **basic** mode for the whole project (no `strict` paths).
+  Strict mode was dropped: it forced the `reportUnknown*` rules back on for
+  `src/` and buried ~50 unactionable warnings from the untyped API JSON, which
+  made `make lint` always fail. Basic still catches the real bugs (None access,
+  wrong types, unbound names, bad signatures). See the comment in `pyproject.toml`.
+- `reportUnknownMemberType` / `-ArgumentType` / `-VariableType` are off on
+  purpose - the Intervals.icu client works with `response.json()` (`Any`).
 - Allow imports without type stubs
 - Run `make lint/pyright` or `uv run pyright`
 

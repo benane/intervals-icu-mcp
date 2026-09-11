@@ -737,6 +737,42 @@ class ICUClient:
         dto = self._parse(adapter, data)
         return dto.icu_intervals or []
 
+    async def update_intervals(
+        self,
+        activity_id: str,
+        intervals: list[dict[str, Any]],
+        replace: bool = False,
+    ) -> list[Interval]:
+        """Create or replace intervals on an activity.
+
+        Args:
+            activity_id: Activity ID
+            intervals: List of interval dicts. Each needs ``start_index`` and
+                ``end_index`` (indices into the activity's data streams).
+                ``label`` is optional. Note: intervals.icu stores every interval
+                written through this endpoint as ``type="WORK"`` regardless of
+                the ``type`` sent - ``RECOVERY`` is only ever assigned by its own
+                auto-analyzer.
+            replace: If True the request uses ``?all=true`` and the given set
+                replaces every existing interval. If False (default) it uses
+                ``?all=false`` and the given intervals are merged into the
+                existing ones (each new interval is carved out of whatever it
+                overlaps, keeping the timeline contiguous).
+
+        Returns:
+            The full list of intervals on the activity after the write.
+        """
+        params = {"all": "true" if replace else "false"}
+        response = await self._request(
+            "PUT", f"/activity/{activity_id}/intervals", params=params, json=intervals
+        )
+        data = response.json()
+        if not data:
+            return []
+        adapter = TypeAdapter(IntervalsDTO)
+        dto = self._parse(adapter, data)
+        return dto.icu_intervals or []
+
     async def get_activity_streams(
         self,
         activity_id: str,
